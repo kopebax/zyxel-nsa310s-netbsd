@@ -60,7 +60,13 @@ written in Lua – both the interpreter and the HTTP server are in the NetBSD ba
 
 ## Screenshots
 
-The web panel (English UI; example data):
+The web panel (English UI; example data).
+
+### Dashboard
+
+![Dashboard – system, space, network, services, front panel LEDs, error signals, next power-on](screenshots/dashboard.png)
+
+### Other pages
 
 | | |
 |---|---|
