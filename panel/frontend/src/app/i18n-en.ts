@@ -82,7 +82,7 @@ export const EN: Record<string, string> = {
   'Usunąć grupę {0}?': 'Delete group {0}?',
 
   // --- shares
-  'Samba (udziały dla Windows/macOS) jest w trakcie instalacji – ustawienia SMB zaczną działać po jej zakończeniu. NFS i przeglądarka plików działają już teraz.': 'Samba (shares for Windows/macOS) is being installed – SMB settings will take effect when it is done. NFS and the file browser already work.',
+  'Samba (udziały dla Windows/macOS) nie jest zainstalowana – ustawienia SMB nie działają. Udziały są dostępne przez NFS i w przeglądarce plików.': 'Samba (shares for Windows/macOS) is not installed – SMB settings have no effect. Shares are available over NFS and in the file browser.',
   'Nazwa udziału': 'Share name', 'Właściciel': 'Owner', 'Usuń udział (pliki zostają na dysku)': 'Delete share (files stay on the disk)',
   'Prawa dostępu': 'Access rights', 'Pełny': 'Full', 'Odczyt': 'Read', 'Brak': 'Deny',
   'Administratorzy mają zawsze pełny dostęp w panelu. Prawa dotyczą Samby i przeglądarki plików.': 'Administrators always have full access in the panel. Rights apply to Samba and the file browser.',

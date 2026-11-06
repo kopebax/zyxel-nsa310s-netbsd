@@ -22,7 +22,7 @@ type Dostep = Prawo | 'brak';
     <div class="strona">
       <h1>{{ 'Udziały' | t }}</h1>
       @if (!samba()) {
-        <div class="info">{{ 'Samba (udziały dla Windows/macOS) jest w trakcie instalacji – ustawienia SMB zaczną działać po jej zakończeniu. NFS i przeglądarka plików działają już teraz.' | t }}</div>
+        <div class="info">{{ 'Samba (udziały dla Windows/macOS) nie jest zainstalowana – ustawienia SMB nie działają. Udziały są dostępne przez NFS i w przeglądarce plików.' | t }}</div>
       }
       @for (u of lista(); track $index; let i = $index) {
         <section class="karta udzial">

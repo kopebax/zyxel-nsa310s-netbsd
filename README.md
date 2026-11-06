@@ -11,17 +11,18 @@ network) are placeholders – replace them with your own.
 
 1. [Hardware](#hardware)
 2. [Features](#features)
-3. [Repository layout](#repository-layout)
-4. [Releases](#releases)
-5. [Kernel](#kernel)
-6. [Installation on a USB stick](#installation-on-a-usb-stick)
-7. [U-Boot](#u-boot)
-8. [Web panel](#web-panel)
-9. [nas-httpd](#nas-httpd)
-10. [Deploying changes](#deploying-changes)
-11. [Backup and recovery](#backup-and-recovery)
-12. [Hardware reference](#hardware-reference)
-13. [Pitfalls](#pitfalls)
+3. [Screenshots](#screenshots)
+4. [Repository layout](#repository-layout)
+5. [Releases](#releases)
+6. [Kernel](#kernel)
+7. [Installation on a USB stick](#installation-on-a-usb-stick)
+8. [U-Boot](#u-boot)
+9. [Web panel](#web-panel)
+10. [nas-httpd](#nas-httpd)
+11. [Deploying changes](#deploying-changes)
+12. [Backup and recovery](#backup-and-recovery)
+13. [Hardware reference](#hardware-reference)
+14. [Pitfalls](#pitfalls)
 
 ## Hardware
 
@@ -56,6 +57,21 @@ network) are placeholders – replace them with your own.
 
 Go does not run on this CPU (Go for NetBSD/arm requires ARMv6), so the panel backend is
 written in Lua – both the interpreter and the HTTP server are in the NetBSD base system.
+
+## Screenshots
+
+The web panel (English UI; example data):
+
+| | |
+|---|---|
+| ![Dashboard](screenshots/dashboard.png) **Dashboard** – system, space, network, services, front panel LEDs | ![Shares](screenshots/shares.png) **Shares** – folders, per-user rights, NFS clients |
+| ![Disk and SMART](screenshots/disk.png) **Disk and SMART** – attributes, self-test, fsck | ![Schedule](screenshots/schedule.png) **Power schedule** – on / off by weekday, RTC wake-up |
+| ![Users](screenshots/users.png) **Users** – administrators and regular users | ![Firewall](screenshots/firewall.png) **Firewall (npf)** – home networks, NFS hosts |
+| ![Dark theme](screenshots/dashboard-dark.png) **Dark theme** – follows the system setting | ![Login](screenshots/login.png) **Login** – Polish / English |
+
+| Phone | Serial console – NetBSD start |
+|---|---|
+| ![Mobile](screenshots/dashboard-mobile.png) | ![Console](screenshots/console-rc.png) |
 
 ## Repository layout
 
@@ -241,6 +257,11 @@ Connector J1 on the board, 3.3 V, 115200 8N1:
 | 4 | – | |
 | 5 (next to USB) | GND | GND |
 
+Boot over the serial console – U-Boot loads `nbsd.ub` from the stick, then the NetBSD kernel
+probes the hardware (patched PHY, `htrtc`, SATA disk, USB stick):
+
+![U-Boot and kernel boot](screenshots/console-boot.png)
+
 ### Boot NetBSD, fall back to Zyxel
 
 ```
@@ -326,6 +347,15 @@ modules – they are set in `naspanel.rc`.
 | | Updates | pkgin (background check, upgrade), vulnerability audit |
 | | Config backup | download `/etc` + `/usr/pkg/etc` without secrets |
 | | Logs | messages, authlog, COPY, fsck, updates |
+
+#### All pages
+
+| | |
+|---|---|
+| ![File browser](screenshots/files.png) **File browser** – shares available to the logged-in user | ![TCP/IP network](screenshots/network.png) **TCP/IP network** – DHCP / static with auto-revert |
+| ![Name and time](screenshots/time.png) **Name and time** – hostname, time zone, NTP | ![Services](screenshots/services.png) **Services** – status and autostart |
+| ![COPY button](screenshots/copy.png) **COPY button** – copy / sync from USB | ![Power](screenshots/power.png) **Power** – shut down, restart, disk standby, one-time wake-up |
+| ![System log](screenshots/logs.png) **System log** – messages, authlog, COPY, fsck | ![Shares](screenshots/shares.png) **Shares** |
 
 ### Security
 
