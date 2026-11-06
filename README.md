@@ -527,6 +527,7 @@ The fan is driven by the MCU and invisible to NetBSD. `nas-temperatura` (cron, e
 | `netbsd.gz.ub` | U-Boot hangs after decompression | use the uncompressed `netbsd.ub` |
 | `smartctl` on mvsata | ATA queue stalls (`atafin`), the whole disk blocks (`biowait`), even DDB `reboot` hangs on sync | SMART via `atactl wd0 smart status\|selftest-log\|offline 1` only |
 | I²C address 0x64 | reading it locks the bus | leave it alone |
+| NFS from KDE / Dolphin (`nfs://`) | folders listed but cannot be opened ("Refused mount RPC … port 5xxxx") | `mountd_flags="-N"` – allow non-reserved client ports (`-n` is ignored on NetBSD) |
 | `fsck` on a mounted root | system directories end up in `lost+found` | full fsck only with the stick attached to another system |
 | `resize_root` with WAPBL | new size lost after reboot | disable the journal for that boot, or `resize_ffs` in single-user mode |
 | Samba from source (QEMU, earmv5) | `waf configure` hangs after ~900 checks | thread stacks exhaust the 32-bit address space – `PTHREAD_STACKSIZE=512`; abandoned (~5 h build) |
