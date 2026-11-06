@@ -24,10 +24,9 @@ pole() {	# pole NAZWA KLUCZ – wartość opcji z wiersza "udzial"
 mount | grep -q ' on /dysk ' && \
 for n in $(awk '$1 == "udzial" { print $2 }' "$MODEL"); do
 	wl=$(pole "$n" wlasciciel); wl=${wl:-admin}
-	if [ ! -d "/dysk/$n" ]; then
-		mkdir -p "/dysk/$n"
-		chown "$wl:users" "/dysk/$n"; chmod 2775 "/dysk/$n"
-	fi
+	# katalog udziału (tylko on, bez zawartości) ma właściciela z panelu
+	[ -d "/dysk/$n" ] || mkdir -p "/dysk/$n"
+	chown "$wl:users" "/dysk/$n"; chmod 2775 "/dysk/$n"
 done
 
 # --- NFS
