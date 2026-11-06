@@ -40,7 +40,7 @@ import { I18n, TPipe } from '../i18n';
           <tr mat-row *matRowDef="let r; columns: kolumny"></tr>
         </table>
         <div class="przyciski"><button mat-stroked-button (click)="nowy()"><span class="material-symbols-outlined">person_add</span> {{ 'Dodaj użytkownika' | t }}</button></div>
-        <p class="podpowiedz">{{ 'Hasło służy do logowania w panelu (przeglądarka plików) i do udziałów Samby. Administrator ma dostęp do całego panelu i wszystkich udziałów. SSH działa tylko z kluczem.' | t }}</p>
+        <p class="podpowiedz">{{ 'Hasło służy do logowania w panelu (przeglądarka plików). Administrator ma dostęp do całego panelu i wszystkich udziałów. SSH działa tylko z kluczem.' | t }}</p>
       </section>
 
       @if (edycja(); as e) {

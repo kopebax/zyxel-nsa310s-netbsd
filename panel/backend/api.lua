@@ -464,7 +464,6 @@ local function wczytaj_model()
 		local x = wg[n]
 		if typ == "udzial" then
 			x = { nazwa = n, sciezka = "/dysk/" .. n, wlasciciel = reszta:match("wlasciciel=(%S+)") or "admin",
-				kosz = reszta:match("kosz=tak") ~= nil, smb = reszta:match("smb=tak") ~= nil,
 				prawa = lista(), nfs = nil }
 			wg[n] = x
 			u[#u + 1] = x
@@ -506,8 +505,7 @@ function H.udzialy(env, headers, query)
 		return wynik(priv({ "udzialy-model-ustaw" }, table.concat(linie(pole(query, "dane")), "\n") .. "\n"))
 	end
 	if not wymagaj(env, headers, false) then return end
-	odpowiedz(200, { udzialy = (wczytaj_model()),
-		samba = io.open("/usr/pkg/sbin/smbd", "r") ~= nil })
+	odpowiedz(200, { udzialy = (wczytaj_model()) })
 end
 
 ------------------------------------------------------------------ przeglądarka plików
@@ -730,7 +728,7 @@ function H.uzytkownicy(env, headers, query)
 			if #haslo < 8 then return blad(400, "Hasło musi mieć co najmniej 8 znaków") end
 			local ok, out = priv({ "uzytkownik-dodaj", nazwa })
 			if not ok then return wynik(ok, out) end
-			ok, out = priv({ "uzytkownik-haslo", nazwa }, nowy_wpis_hasla(haslo) .. "\n" .. haslo .. "\n")
+			ok, out = priv({ "uzytkownik-haslo", nazwa }, nowy_wpis_hasla(haslo) .. "\n")
 			if not ok then return wynik(ok, out) end
 			if pole(query, "admin") == "1" then priv({ "uzytkownik-typ", nazwa, "admin" }) end
 			return odpowiedz(200, { ok = true })
@@ -738,7 +736,7 @@ function H.uzytkownicy(env, headers, query)
 		if akcja == "haslo" then
 			local haslo = pole(query, "haslo")
 			if #haslo < 8 then return blad(400, "Hasło musi mieć co najmniej 8 znaków") end
-			return wynik(priv({ "uzytkownik-haslo", nazwa }, nowy_wpis_hasla(haslo) .. "\n" .. haslo .. "\n"))
+			return wynik(priv({ "uzytkownik-haslo", nazwa }, nowy_wpis_hasla(haslo) .. "\n"))
 		end
 		if akcja == "typ" then return wynik(priv({ "uzytkownik-typ", nazwa, pole(query, "typ") })) end
 		if akcja == "usun" then return wynik(priv({ "uzytkownik-usun", nazwa })) end
@@ -885,7 +883,7 @@ function H.haslo(env, headers, query)
 		return blad(400, "Obecne hasło jest niepoprawne")
 	end
 	if #nowe < 8 then return blad(400, "Nowe hasło musi mieć co najmniej 8 znaków") end
-	wynik(priv({ "uzytkownik-haslo", s.uzytkownik }, nowy_wpis_hasla(nowe) .. "\n" .. nowe .. "\n"))
+	wynik(priv({ "uzytkownik-haslo", s.uzytkownik }, nowy_wpis_hasla(nowe) .. "\n"))
 end
 
 ------------------------------------------------------------------ konserwacja

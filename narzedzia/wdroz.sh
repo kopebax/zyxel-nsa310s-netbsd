@@ -77,9 +77,12 @@ cmp -s system/etc/npf.conf /etc/npf.conf || {
 }
 /sbin/npfctl reload
 
-# rc.d nie zatrzyma procesu, gdy zmienił się program (httpd -> nas-httpd)
-/etc/rc.d/naspanel stop >/dev/null 2>&1 || { [ -f /var/run/naspanel.pid ] && kill \$(cat /var/run/naspanel.pid) 2>/dev/null; } || true
-sleep 1; /etc/rc.d/naspanel start >/dev/null
+# zatrzymanie po pidfile: rc.d stop potrafi czekać bez końca (stary httpd
+# z zombie-dziećmi nie kończy się po SIGTERM), a zapora cofa się po 60 s
+p=\$(cat /var/run/naspanel.pid 2>/dev/null || true)
+if [ -n \"\$p\" ]; then kill \$p 2>/dev/null || true; sleep 3; kill -9 \$p 2>/dev/null || true; fi
+rm -f /var/run/naspanel.pid
+/etc/rc.d/naspanel start >/dev/null
 /etc/rc.d/naspanel80 restart >/dev/null 2>&1 || /etc/rc.d/naspanel80 start >/dev/null
 /usr/pkg/sbin/nas-harmonogram uzbroj || true
 cd /; rm -rf \$P

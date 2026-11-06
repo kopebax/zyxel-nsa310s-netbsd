@@ -21,9 +21,6 @@ type Dostep = Prawo | 'brak';
   template: `
     <div class="strona">
       <h1>{{ 'Udziały' | t }}</h1>
-      @if (!samba()) {
-        <div class="info">{{ 'Samba (udziały dla Windows/macOS) nie jest zainstalowana – ustawienia SMB nie działają. Udziały są dostępne przez NFS i w przeglądarce plików.' | t }}</div>
-      }
       @for (u of lista(); track $index; let i = $index) {
         <section class="karta udzial">
           <div class="naglowek">
@@ -56,11 +53,9 @@ type Dostep = Prawo | 'brak';
               </div>
             }
           </div>
-          <p class="podpowiedz">{{ 'Administratorzy mają zawsze pełny dostęp w panelu. Prawa dotyczą Samby i przeglądarki plików.' | t }}</p>
+          <p class="podpowiedz">{{ 'Administratorzy mają zawsze pełny dostęp w panelu. Prawa dotyczą przeglądarki plików.' | t }}</p>
 
           <div class="opcje">
-            <mat-slide-toggle [(ngModel)]="u.smb">{{ 'Udostępniaj przez SMB (Windows, macOS)' | t }}</mat-slide-toggle>
-            <mat-slide-toggle [(ngModel)]="u.kosz">{{ 'Kosz (usunięte przez SMB pliki trafiają do .recycle)' | t }}</mat-slide-toggle>
             <mat-slide-toggle [ngModel]="!!u.nfs" (ngModelChange)="u.nfs = $event ? { tryb: 'rw', klienci: [] } : null">
               {{ 'Udostępniaj przez NFS (Linux, dostęp po adresie IP)' | t }}</mat-slide-toggle>
           </div>
@@ -110,7 +105,6 @@ export class Udzialy implements OnInit {
   protected readonly lista = signal<Udzial[]>([]);
   protected readonly uzytkownicy = signal<Uzytkownik[]>([]);
   protected readonly grupyL = signal<Grupa[]>([]);
-  protected readonly samba = signal(true);
   protected readonly praca = signal(false);
   protected readonly nowe = new Set<Udzial>();
   protected readonly ip = location.hostname;
@@ -126,11 +120,10 @@ export class Udzialy implements OnInit {
   async ngOnInit(): Promise<void> {
     try {
       const [d, u, g] = await Promise.all([
-        this.api.get<{ udzialy: Udzial[]; samba: boolean }>('udzialy'),
+        this.api.get<{ udzialy: Udzial[] }>('udzialy'),
         this.api.get<{ uzytkownicy: Uzytkownik[] }>('uzytkownicy'),
         this.api.get<{ grupy: Grupa[] }>('grupy')]);
       this.lista.set(d.udzialy);
-      this.samba.set(d.samba);
       this.uzytkownicy.set(u.uzytkownicy);
       this.grupyL.set(g.grupy);
     } catch (e) {
@@ -151,7 +144,7 @@ export class Udzialy implements OnInit {
   }
 
   protected dodaj(): void {
-    const u: Udzial = { nazwa: 'Nowy', sciezka: '', wlasciciel: this.api.uzytkownik() || 'admin', kosz: true, smb: true,
+    const u: Udzial = { nazwa: 'Nowy', sciezka: '', wlasciciel: this.api.uzytkownik() || 'admin',
       prawa: [{ typ: 'uzytkownik', nazwa: this.api.uzytkownik() || 'admin', prawo: 'rw' }], nfs: null };
     this.nowe.add(u);
     this.lista.update(l => [...l, u]);
@@ -175,7 +168,7 @@ export class Udzialy implements OnInit {
     if (l.some(u => u.nfs && u.nfs.klienci.length === 0)) { this.kom.ok('Udział z NFS musi mieć co najmniej jeden adres'); return; }
     const w: string[] = [];
     for (const u of l) {
-      w.push(`udzial ${u.nazwa} wlasciciel=${u.wlasciciel} kosz=${u.kosz ? 'tak' : 'nie'} smb=${u.smb ? 'tak' : 'nie'}`);
+      w.push(`udzial ${u.nazwa} wlasciciel=${u.wlasciciel}`);
       if (u.prawa.length) w.push(`prawa ${u.nazwa} ` + u.prawa.map(p => `${p.typ === 'grupa' ? 'g' : 'u'}:${p.nazwa}=${p.prawo}`).join(' '));
       if (u.nfs) w.push(`nfs ${u.nazwa} ${u.nfs.tryb} ${u.nfs.klienci.join(',')}`);
     }

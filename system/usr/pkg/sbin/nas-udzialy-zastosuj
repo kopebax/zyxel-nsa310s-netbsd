@@ -1,17 +1,15 @@
 #!/bin/sh
 #
 # nas-udzialy-zastosuj – z modelu udziałów (/etc/nas-panel/udzialy, panel WWW)
-# generuje: katalogi /dysk/NAZWA, /etc/exports (NFS), tabelę zapory <nfs>
-# i /usr/pkg/etc/samba/smb.conf (gdy Samba jest zainstalowana).
+# generuje: katalogi /dysk/NAZWA, /etc/exports (NFS) i tabelę zapory <nfs>.
 #
 # Model (jak w Zyxelu):
-#   udzial NAZWA wlasciciel=U kosz=tak|nie smb=tak|nie
+#   udzial NAZWA wlasciciel=U
 #   prawa  NAZWA u:UZYTKOWNIK=rw|ro g:GRUPA=rw|ro ...   brak wpisu = brak dostępu
 #   nfs    NAZWA ro|rw KLIENT,KLIENT                    dostęp NFS po adresie IP
 #
 PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin
 MODEL=/etc/nas-panel/udzialy
-SMBCONF=/usr/pkg/etc/samba/smb.conf
 
 [ -f "$MODEL" ] || exit 0
 
@@ -51,67 +49,4 @@ sort -u "$k" > /etc/npf.d/nfs; rm -f "$k"
 /etc/rc.d/mountd reload >/dev/null 2>&1
 /sbin/npfctl reload >/dev/null 2>&1
 
-# --- Samba
-if [ -d /usr/pkg/etc/samba ]; then
-	t=$(mktemp)
-	siec=$(tr '\n' ' ' < /etc/npf.d/dom)
-	cat > "$t" <<EOF
-# smb.conf – generowany przez panel NAS z /etc/nas-panel/udzialy (nie edytować)
-[global]
-	workgroup = $(cat /etc/nas-panel/grupa-robocza 2>/dev/null || echo WORKGROUP)
-	netbios name = $(hostname | tr a-z A-Z)
-	server string = NAS NSA310S
-	security = user
-	map to guest = Never
-	# Windows 10/11: SMB2/3 (bez SMB1), podpisywanie gdy klient go wymaga (11 24H2)
-	server min protocol = SMB2_10
-	server signing = auto
-	# bez NetBIOS – tylko port 445; NAS otwiera się przez \\\\192.168.0.2
-	disable netbios = yes
-	smb ports = 445
-	hosts allow = 127.0.0.1 $siec
-	hosts deny = ALL
-	load printers = no
-	printing = bsd
-	printcap name = /dev/null
-	disable spoolss = yes
-	log file = /var/log/samba/log.%m
-	max log size = 200
-	unix charset = UTF-8
-	dos charset = CP852
-
-EOF
-	awk '$1 == "udzial" && / smb=tak/ { print $2 }' "$MODEL" | while read n; do
-		wl=$(pole "$n" wlasciciel); wl=${wl:-admin}
-		prawa=$(awk -v n="$n" '$1 == "prawa" && $2 == n { for (i = 3; i <= NF; i++) print $i }' "$MODEL")
-		kto() {	# lista użytkowników/grup z prawem $1 (rw|ro|*)
-			echo "$prawa" | awk -F'[:=]' -v p="$1" 'NF == 3 && (p == "*" || $3 == p) {
-				printf "%s%s ", ($1 == "g" ? "@" : ""), $2 }'
-		}
-		{
-			echo "[$n]"
-			echo "	path = /dysk/$n"
-			echo "	valid users = $(kto '*')"
-			echo "	read list = $(kto ro)"
-			echo "	write list = $(kto rw)"
-			echo "	read only = yes"
-			echo "	force user = $wl"
-			echo "	force group = users"
-			echo "	create mask = 0664"
-			echo "	directory mask = 2775"
-			echo "	veto files = /.nas-*/"
-			if [ "$(pole "$n" kosz)" = tak ]; then
-				echo "	vfs objects = recycle"
-				echo "	recycle:repository = .recycle"
-				echo "	recycle:keeptree = yes"
-				echo "	recycle:versions = yes"
-				echo "	recycle:touch = yes"
-			fi
-			echo
-		} >> "$t"
-	done
-	cp "$SMBCONF" "$SMBCONF.poprzedni" 2>/dev/null
-	mv "$t" "$SMBCONF"; chmod 644 "$SMBCONF"
-	pkill -HUP -x smbd 2>/dev/null
-fi
 exit 0

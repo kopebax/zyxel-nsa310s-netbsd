@@ -23,7 +23,7 @@ const BLEDY = [
 ];
 
 const USLUGI: Record<string, string> = {
-  sshd: 'SSH', nfsd: 'NFS', mountd: 'NFS mountd', ntpd: 'Czas (NTP)', powerd: 'Przyciski (powerd)', smbd: 'Samba',
+  sshd: 'SSH', nfsd: 'NFS', mountd: 'NFS mountd', ntpd: 'Czas (NTP)', powerd: 'Przyciski (powerd)',
 };
 
 @Component({

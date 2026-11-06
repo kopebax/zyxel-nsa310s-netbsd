@@ -31,7 +31,7 @@ import { TPipe } from '../i18n';
           <button mat-flat-button (click)="zmien()" [disabled]="praca() || !stare || nowe.length < 8 || nowe !== powtorz">
             {{ 'Zmień hasło' | t }}</button>
         </div>
-        <p class="podpowiedz">{{ 'Hasło dotyczy panelu i udziałów Samby.' | t }}</p>
+        <p class="podpowiedz">{{ 'Hasło dotyczy panelu i przeglądarki plików.' | t }}</p>
       </section>
     </div>`,
   styles: `.waska { max-width: 480px; }`,

@@ -26,7 +26,7 @@ interface Stan { aktywna: boolean; dom: string[]; nfs: string[]; klient: string;
           </section>
 
           <section class="karta">
-            <h2><span class="material-symbols-outlined">admin_panel_settings</span>{{ 'Dostęp do SSH, panelu i Samby' | t }}</h2>
+            <h2><span class="material-symbols-outlined">admin_panel_settings</span>{{ 'Dostęp do SSH i panelu' | t }}</h2>
             <mat-form-field appearance="outline" class="pelne">
               <mat-label>{{ 'Sieci i adresy – jeden w wierszu' | t }}</mat-label>
               <textarea matInput class="mono" rows="5" [(ngModel)]="dom"></textarea>

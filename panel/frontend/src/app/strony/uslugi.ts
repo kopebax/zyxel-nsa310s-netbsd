@@ -8,7 +8,6 @@ import { TPipe } from '../i18n';
 
 const OPISY: Record<string, { nazwa: string; opis: string }> = {
   nfs: { nazwa: 'NFS', opis: 'udziały plików dla Linuksa (rpcbind, mountd, nfsd)' },
-  samba: { nazwa: 'Samba (SMB)', opis: 'udziały plików dla Windows i macOS' },
   ntpd: { nazwa: 'NTP', opis: 'synchronizacja czasu' },
   sshd: { nazwa: 'SSH', opis: 'zdalne logowanie (tylko restart)' },
   powerd: { nazwa: 'powerd', opis: 'obsługa przycisków power/reset/copy' },

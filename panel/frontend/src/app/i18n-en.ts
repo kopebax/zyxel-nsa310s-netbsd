@@ -69,7 +69,7 @@ export const EN: Record<string, string> = {
 
   // --- users and groups
   'Typ konta': 'Account type', 'Administrator': 'Administrator', 'Usuń konto': 'Delete account', 'Dodaj użytkownika': 'Add user',
-  'Hasło służy do logowania w panelu (przeglądarka plików) i do udziałów Samby. Administrator ma dostęp do całego panelu i wszystkich udziałów. SSH działa tylko z kluczem.': 'The password is used to log in to the panel (file browser) and to Samba shares. Administrators can access the whole panel and all shares. SSH works with keys only.',
+  'Hasło służy do logowania w panelu (przeglądarka plików). Administrator ma dostęp do całego panelu i wszystkich udziałów. SSH działa tylko z kluczem.': 'The password is used to log in to the panel (file browser). Administrators can access the whole panel and all shares. SSH works with keys only.',
   'Nowy użytkownik': 'New user', 'Nazwa użytkownika': 'User name',
   'Pierwsza litera, potem małe litery, cyfry, _ i -.': 'A letter first, then lowercase letters, digits, _ and -.',
   'Nowe hasło (puste = bez zmiany)': 'New password (empty = unchanged)',
@@ -82,12 +82,9 @@ export const EN: Record<string, string> = {
   'Usunąć grupę {0}?': 'Delete group {0}?',
 
   // --- shares
-  'Samba (udziały dla Windows/macOS) nie jest zainstalowana – ustawienia SMB nie działają. Udziały są dostępne przez NFS i w przeglądarce plików.': 'Samba (shares for Windows/macOS) is not installed – SMB settings have no effect. Shares are available over NFS and in the file browser.',
   'Nazwa udziału': 'Share name', 'Właściciel': 'Owner', 'Usuń udział (pliki zostają na dysku)': 'Delete share (files stay on the disk)',
   'Prawa dostępu': 'Access rights', 'Pełny': 'Full', 'Odczyt': 'Read', 'Brak': 'Deny',
-  'Administratorzy mają zawsze pełny dostęp w panelu. Prawa dotyczą Samby i przeglądarki plików.': 'Administrators always have full access in the panel. Rights apply to Samba and the file browser.',
-  'Udostępniaj przez SMB (Windows, macOS)': 'Share via SMB (Windows, macOS)',
-  'Kosz (usunięte przez SMB pliki trafiają do .recycle)': 'Recycle bin (files deleted over SMB go to .recycle)',
+  'Administratorzy mają zawsze pełny dostęp w panelu. Prawa dotyczą przeglądarki plików.': 'Administrators always have full access in the panel. Rights apply to the file browser.',
   'Udostępniaj przez NFS (Linux, dostęp po adresie IP)': 'Share via NFS (Linux, access by IP address)',
   'Odczyt i zapis': 'Read and write', 'Tylko odczyt': 'Read only',
   'Komputery NFS (IP albo sieć CIDR) – Enter dodaje': 'NFS computers (IP or CIDR network) – Enter adds',
@@ -126,7 +123,7 @@ export const EN: Record<string, string> = {
   // --- firewall
   'Zapora (npf)': 'Firewall (npf)', 'włączona': 'enabled', 'wyłączona': 'disabled', 'Twój komputer': 'Your computer',
   'Wszystko, czego nie ma na listach, jest blokowane. Ping jest zawsze dozwolony.': 'Everything not on the lists is blocked. Ping is always allowed.',
-  'Dostęp do SSH, panelu i Samby': 'Access to SSH, panel and Samba', 'Sieci i adresy – jeden w wierszu': 'Networks and addresses – one per line',
+  'Dostęp do SSH i panelu': 'Access to SSH and the panel', 'Sieci i adresy – jeden w wierszu': 'Networks and addresses – one per line',
   'np. 192.168.0.0/24 albo 192.168.0.20': 'e.g. 192.168.0.0/24 or 192.168.0.20',
   'Zmiana, która odcięłaby Twój komputer, zostanie odrzucona.': 'A change that would lock out your computer is rejected.',
   'Dostęp do NFS': 'NFS access', 'Lista tworzona automatycznie z adresów NFS w udziałach.': 'Built automatically from NFS addresses in the shares.',
@@ -142,7 +139,7 @@ export const EN: Record<string, string> = {
   'Nowy certyfikat – odśwież stronę za kilka sekund': 'New certificate – refresh the page in a few seconds',
   'Zmiana hasła': 'Change password', 'Obecne hasło': 'Current password', 'Nowe hasło (min. 8 znaków)': 'New password (min. 8 characters)',
   'Powtórz nowe hasło': 'Repeat new password', 'Hasła się różnią': 'Passwords do not match', 'Zmień hasło': 'Change password',
-  'Hasło dotyczy panelu i udziałów Samby.': 'The password applies to the panel and Samba shares.', 'Hasło zmienione': 'Password changed',
+  'Hasło dotyczy panelu i przeglądarki plików.': 'The password applies to the panel and the file browser.', 'Hasło zmienione': 'Password changed',
   'Obecne hasło jest niepoprawne': 'The current password is wrong',
   'Nowe hasło musi mieć co najmniej 8 znaków': 'The new password must have at least 8 characters',
   'Hasło musi mieć co najmniej 8 znaków': 'The password must have at least 8 characters',
@@ -209,7 +206,7 @@ export const EN: Record<string, string> = {
   'Obciążenie, RAM, dyski, sieć, usługi, diody, temperatura dysku. Brak obrotów wentylatora (steruje nim mikrokontroler płyty) i listy procesów.': 'Load, RAM, disks, network, services, LEDs, disk temperature. No fan speed (controlled by the board microcontroller) and no process list.',
   'Pakiety pkgin z audytem podatności. Firmware Zyxela nie dotyczy NetBSD.': 'pkgin packages with vulnerability audit. Zyxel firmware does not apply to NetBSD.',
   'Server Name (nazwa, grupa robocza)': 'Server Name (name, workgroup)',
-  'Nazwa urządzenia. Grupa robocza Samby: WORKGROUP (stała).': 'Device name. Samba workgroup: WORKGROUP (fixed).',
+  'Nazwa urządzenia.': 'Device name.',
   'Date/Time (ręcznie, NTP, strefa, czas letni)': 'Date/Time (manual, NTP, zone, DST)',
   'NTP, pełna lista stref, automatyczny czas letni. Bez ręcznego ustawiania zegara (NTP jest dokładniejszy).': 'NTP, full time zone list, automatic DST. No manual clock setting (NTP is more accurate).',
   'Volume (RAID0/1, JBOD, skanowanie, naprawa, dyski zewnętrzne)': 'Volume (RAID0/1, JBOD, scan, repair, external disks)',
@@ -231,7 +228,7 @@ export const EN: Record<string, string> = {
   'Konta z hasłem, typ administrator/użytkownik, klucze SSH. Bez limitów miejsca (quota).': 'Accounts with passwords, administrator/user type, SSH keys. No quotas.',
   'Tworzenie, usuwanie, członkowie.': 'Create, delete, members.',
   'Shares (właściciel, prawa Full/Read Only/Deny, kosz, Share Browser)': 'Shares (owner, Full/Read Only/Deny rights, recycle bin, Share Browser)',
-  'Prawa dla użytkowników i grup, właściciel, kosz (Samba), dodatkowo NFS po adresie IP.': 'Rights for users and groups, owner, recycle bin (Samba), plus NFS by IP address.',
+  'Prawa dla użytkowników i grup, właściciel, dodatkowo NFS po adresie IP. Bez SMB i kosza.': 'Rights for users and groups, owner, plus NFS by IP address. No SMB or recycle bin.',
   'Przeglądarka plików dla użytkowników (wysyłanie, pobieranie)': 'File browser for users (upload, download)',
   'Według praw do udziałów; foldery, zmiana nazwy, usuwanie, wysyłanie przeciąganiem.': 'According to share rights; folders, rename, delete, drag-and-drop upload.',
   'Power (usypianie dysku, harmonogram, WOL, po zaniku prądu, UPS)': 'Power (disk standby, schedule, WOL, after power loss, UPS)',

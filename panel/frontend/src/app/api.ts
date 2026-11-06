@@ -34,7 +34,7 @@ export interface Smart {
 export type Prawo = 'rw' | 'ro';
 export interface PrawoUdzialu { typ: 'uzytkownik' | 'grupa'; nazwa: string; prawo: Prawo; }
 export interface Udzial {
-  nazwa: string; sciezka: string; wlasciciel: string; kosz: boolean; smb: boolean;
+  nazwa: string; sciezka: string; wlasciciel: string;
   prawa: PrawoUdzialu[]; nfs?: { tryb: Prawo; klienci: string[] } | null;
 }
 export interface Grupa { nazwa: string; gid: number; czlonkowie: string[]; }

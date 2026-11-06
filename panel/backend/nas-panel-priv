@@ -158,7 +158,7 @@ kopia-konfiguracji)
 	# tar | gzip zamiast tar -z: bez dopełnienia zerami za strumieniem gzip
 	tar -C / -cf - --exclude 'etc/ssh/ssh_host_*_key' --exclude 'etc/nas-panel/key.pem' \
 	    --exclude 'etc/nas-panel/haslo' --exclude 'etc/nas-panel/hasla' --exclude 'etc/master.passwd' \
-	    --exclude 'etc/spwd.db' --exclude 'etc/samba/private' etc usr/pkg/etc 2>/dev/null | gzip -c ;;
+	    --exclude 'etc/spwd.db' etc usr/pkg/etc 2>/dev/null | gzip -c ;;
 kopia-sprawdz|kopia-przywroc)
 	# $1 = id wgranego pliku (hex) w $STAN; weryfikacja przed przywróceniem
 	echo "$1" | grep -Eq '^[0-9a-f]{32}$' || blad "zły identyfikator pliku"
@@ -394,7 +394,6 @@ uzytkownik-usun)
 	[ "$uid" -ge 1000 ] || blad "konto systemowe"
 	userdel "$1"
 	t=$(mktemp); grep -v "^$1 " $KONF/hasla > "$t" 2>/dev/null; chown root:nasweb "$t"; chmod 640 "$t"; mv "$t" $KONF/hasla
-	[ -x /usr/pkg/bin/smbpasswd ] && /usr/pkg/bin/smbpasswd -x "$1" >/dev/null 2>&1
 	/usr/pkg/sbin/nas-udzialy-zastosuj >/dev/null 2>&1 ;;
 uzytkownik-klucze)
 	# stdin: klucze publiczne ssh (ssh-ed25519/ssh-rsa/ecdsa-...), jeden w wierszu
@@ -512,21 +511,18 @@ uzytkownik-typ)
 	*) blad "zły typ" ;;
 	esac ;;
 uzytkownik-haslo)
-	# $1 użytkownik; stdin: wiersz 1 = wpis pbkdf2 (panel), wiersz 2 = hasło jawne (Samba, jeśli jest)
+	# $1 użytkownik; stdin: wpis pbkdf2 (panel)
 	jest_nazwa "$1" || blad "zła nazwa"
 	id "$1" >/dev/null 2>&1 || blad "nie ma takiego użytkownika"
-	read wpis; read jawne
+	read wpis
 	echo "$wpis" | grep -Eq '^pbkdf2\$[0-9]{3,6}\$[0-9a-f]{32}\$[0-9a-f]{64}$' || blad "zły format"
 	t=$(mktemp); touch $KONF/hasla
 	grep -v "^$1 " $KONF/hasla > "$t"; echo "$1 $wpis" >> "$t"
-	chown root:nasweb "$t"; chmod 640 "$t"; mv "$t" $KONF/hasla
-	if [ -x /usr/pkg/bin/smbpasswd ] && [ -n "$jawne" ]; then
-		printf '%s\n%s\n' "$jawne" "$jawne" | /usr/pkg/bin/smbpasswd -a -s "$1" >/dev/null
-	fi ;;
+	chown root:nasweb "$t"; chmod 640 "$t"; mv "$t" $KONF/hasla ;;
 
 # --- udziały: model jak w Zyxelu --------------------------------------------
 # /etc/nas-panel/udzialy, wiersze:
-#   udzial NAZWA wlasciciel=U kosz=tak|nie smb=tak|nie
+#   udzial NAZWA wlasciciel=U   (stare opcje kosz=/smb= są akceptowane i pomijane)
 #   prawa NAZWA u:NAZWA=rw|ro g:NAZWA=rw|ro ...   (brak wpisu = brak dostępu)
 #   nfs NAZWA ro|rw KLIENT,KLIENT                  (opcjonalnie, dostęp po IP)
 # katalog udziału: /dysk/NAZWA
