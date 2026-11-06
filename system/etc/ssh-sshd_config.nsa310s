@@ -1,0 +1,5 @@
+# NSA310S: tylko klucze, tylko admin
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AllowUsers admin

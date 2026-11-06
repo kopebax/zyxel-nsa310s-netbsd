@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# NSA310S: przycisk zasilania – przytrzymaj 2 s, żeby wyłączyć (shutdown -p).
+# Krótkie, przypadkowe naciśnięcie jest ignorowane.
+#
+led() { /usr/sbin/gpioctl -q gpio0 "$1" "$2" 2>/dev/null; }
+
+case "${2}" in
+pressed)
+	(
+		sleep 2
+		if /usr/sbin/gpioctl gpio0 btn_power 2>/dev/null | grep -q 'state 1'; then
+			led sys_green 0; led sys_orange 1
+			/sbin/shutdown -p now "power button"
+		else
+			logger -p notice "power_button: short press - ignored"
+		fi
+	) &
+	exit 0
+	;;
+released)
+	exit 0
+	;;
+*)
+	logger -p warning "${0}: unsupported event ${2} on device ${1}" >&1
+	exit 1
+	;;
+esac

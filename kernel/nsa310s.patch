@@ -1,0 +1,570 @@
+--- a/sys/arch/arm/marvell/mvsoc.c	2023-06-19 10:40:29.000000000 +0200
++++ b/sys/arch/arm/marvell/mvsoc.c	2026-10-25 18:15:38.666977095 +0100
+@@ -1213,6 +1213,12 @@
+ 		if (reg == 1)	/* 88F6192 is 1 */
+ 			model = MARVELL_KIRKWOOD_88F6192;
+ 	}
++	/*
++	 * 88F6702 (e.g. Zyxel NSA310S) reports its own device ID, but is
++	 * a 88F6192 variant: TCLK 166MHz, same unit layout, one GbE port.
++	 */
++	if (model == 0x6702)
++		model = MARVELL_KIRKWOOD_88F6192;
+ #endif
+ 
+ 	return model;
+--- a/sys/arch/evbarm/marvell/marvell_machdep.c	2023-04-20 10:28:05.000000000 +0200
++++ b/sys/arch/evbarm/marvell/marvell_machdep.c	2026-10-27 18:14:54.174869355 +0100
+@@ -48,6 +48,12 @@
+ #include <dev/cons.h>
+ #include <dev/md.h>
+ 
++#ifdef NSA310S
++#include <sys/callout.h>
++#include <sys/disk.h>
++#include <sys/iostat.h>
++#include <dev/sysmon/sysmonvar.h>
++#endif
+ #include <dev/marvell/marvellreg.h>
+ #include <dev/marvell/marvellvar.h>
+ #include <dev/pci/pcireg.h>
+@@ -129,6 +135,9 @@
+ #endif
+ 
+ static void marvell_device_register(device_t, void *);
++#ifdef NSA310S
++static void nsa310s_powerdown(void);
++#endif
+ #if NGTPCI > 0 || NMVPEX > 0
+ static void marvell_startend_by_tag(int, uint64_t *, uint64_t *);
+ #endif
+@@ -347,6 +356,9 @@
+ 	case MARVELL_KIRKWOOD_88F6281:
+ 	case MARVELL_KIRKWOOD_88F6282:
+ 		cpu_reset_address = marvell_system_reset;
++#ifdef NSA310S
++		cpu_powerdown_address = nsa310s_powerdown;
++#endif
+ 
+ 		kirkwood_bootstrap(MARVELL_INTERREGS_VBASE);
+ 
+@@ -519,11 +531,220 @@
+ }
+ 
+ 
++#ifdef NSA310S
++/*
++ * Zyxel NSA310S: the stock firmware leaves the 88E1318S PHY (address 1)
++ * with its page register (22) set to 3 (LED page), so the ID registers
++ * read as 0 and mii(4) finds no PHY.  Select page 0 before mvgbe attaches
++ * and apply the LED setup from the Linux DTS (marvell,reg-init).
++ */
++static void
++nsa310s_smi_write(int phy, int reg, uint16_t val)
++{
++	volatile uint32_t *smi =
++	    (volatile uint32_t *)(MARVELL_INTERREGS_VBASE + 0x72004);
++	int i;
++
++	for (i = 0; i < 10000 && (*smi & (1 << 28)); i++)	/* busy */
++		delay(1);
++	*smi = (phy << 16) | (reg << 21) | val;			/* write op */
++	for (i = 0; i < 10000 && (*smi & (1 << 28)); i++)
++		delay(1);
++}
++
++/*
++ * Power off: GPIO27 high (Linux DTS: gpio-poweroff, active high).
++ * The board MCU then cuts power; the HT1382 alarm can switch it on again.
++ */
++static uint16_t
++nsa310s_smi_read(int phy, int reg)
++{
++	volatile uint32_t *smi =
++	    (volatile uint32_t *)(MARVELL_INTERREGS_VBASE + 0x72004);
++	uint32_t v;
++	int i;
++
++	for (i = 0; i < 10000 && (*smi & (1 << 28)); i++)	/* busy */
++		delay(1);
++	*smi = (phy << 16) | (reg << 21) | (1 << 26);		/* read op */
++	for (i = 0; i < 10000 && (*smi & (1 << 28)); i++)
++		delay(1);
++	for (i = 0; i < 10000; i++) {
++		v = *smi;
++		if (v & (1 << 27))				/* read valid */
++			return v & 0xffff;
++		delay(1);
++	}
++	return 0xffff;
++}
++
++/*
++ * Arm magic-packet Wake-on-LAN in the 88E1318S (as Linux m88e1318_set_wol):
++ * the PHY pulls LED[2]/INTn low on a magic packet and the board MCU powers
++ * the NAS on.  The MAC address is taken from the GbE port registers.
++ */
++static void
++nsa310s_wol_arm(void)
++{
++	uint32_t ah = *(volatile uint32_t *)(MARVELL_INTERREGS_VBASE + 0x72418);
++	uint32_t al = *(volatile uint32_t *)(MARVELL_INTERREGS_VBASE + 0x72414);
++	uint8_t a[6] = { ah >> 24, ah >> 16, ah >> 8, ah, al >> 8, al };
++	uint16_t v;
++
++	nsa310s_smi_write(1, 22, 0);				/* copper page */
++	v = nsa310s_smi_read(1, 0);
++	nsa310s_smi_write(1, 0, v & ~(1 << 11));		/* not powered down */
++	(void)nsa310s_smi_read(1, 0x13);			/* clear events */
++	v = nsa310s_smi_read(1, 0x12);
++	nsa310s_smi_write(1, 0x12, v | (1 << 7));		/* WOL event irq */
++
++	nsa310s_smi_write(1, 22, 3);				/* LED page */
++	v = nsa310s_smi_read(1, 0x12);
++	v &= ~(1 << 15);					/* no forced int */
++	v |= (1 << 7) | (1 << 11);				/* INTn, active low */
++	nsa310s_smi_write(1, 0x12, v);
++
++	nsa310s_smi_write(1, 22, 0x11);				/* WOL page */
++	nsa310s_smi_write(1, 0x17, (a[5] << 8) | a[4]);
++	nsa310s_smi_write(1, 0x18, (a[3] << 8) | a[2]);
++	nsa310s_smi_write(1, 0x19, (a[1] << 8) | a[0]);
++	v = nsa310s_smi_read(1, 0x10);
++	nsa310s_smi_write(1, 0x10, v | (1 << 12) | (1 << 14));	/* clr + magic */
++
++	nsa310s_smi_write(1, 22, 0);
++	printf("nsa310s: Wake-on-LAN armed for %02x:%02x:%02x:%02x:%02x:%02x\n",
++	    a[0], a[1], a[2], a[3], a[4], a[5]);
++}
++
++static void
++nsa310s_powerdown(void)
++{
++	volatile uint32_t *gpp =
++	    (volatile uint32_t *)(MARVELL_INTERREGS_VBASE + 0x10100);
++
++	nsa310s_wol_arm();
++
++	/* same sequence as Linux gpio-poweroff: high, low, high */
++	gpp[0] |= (1U << 27);		/* data out */
++	gpp[1] &= ~(1U << 27);		/* output enable (0 = output) */
++	delay(100000);
++	gpp[0] &= ~(1U << 27);
++	delay(100000);
++	gpp[0] |= (1U << 27);
++	delay(3000000);
++}
++
++/*
++ * Front/back buttons, polled every 100 ms and reported to powerd(8):
++ * power (GPIO26, active high), reset (GPIO24) and copy (GPIO25, active low).
++ * powerd runs /etc/powerd/scripts/{power,reset,hotkey}_button.
++ */
++static struct sysmon_pswitch nsa310s_psw[] = {
++	{ .smpsw_name = "power", .smpsw_type = PSWITCH_TYPE_POWER },
++	{ .smpsw_name = "reset", .smpsw_type = PSWITCH_TYPE_RESET },
++	{ .smpsw_name = "copy",  .smpsw_type = PSWITCH_TYPE_HOTKEY },
++};
++static const struct {
++	int	pin;
++	bool	active_low;
++} nsa310s_btn[] = {
++	{ 26, false },
++	{ 24, true },
++	{ 25, true },
++};
++static bool nsa310s_btn_down[__arraycount(nsa310s_btn)];
++static callout_t nsa310s_btn_ch;
++static struct disk *nsa310s_wd;
++static uint64_t nsa310s_wd_xfer;
++
++static bool
++nsa310s_btn_pressed(uint32_t din, int i)
++{
++	return (((din >> nsa310s_btn[i].pin) & 1) != 0) !=
++	    nsa310s_btn[i].active_low;
++}
++
++static void
++nsa310s_btn_poll(void *arg)
++{
++	uint32_t din = *(volatile uint32_t *)
++	    (MARVELL_INTERREGS_VBASE + 0x10110);	/* GPIO data in */
++	int i;
++
++	for (i = 0; i < __arraycount(nsa310s_btn); i++) {
++		bool down = nsa310s_btn_pressed(din, i);
++
++		if (down == nsa310s_btn_down[i])
++			continue;
++		nsa310s_btn_down[i] = down;
++		sysmon_pswitch_event(&nsa310s_psw[i],
++		    down ? PSWITCH_EVENT_PRESSED : PSWITCH_EVENT_RELEASED);
++	}
++
++	/* HDD LED (GPIO16): on while wd0 is idle, blinks off on transfers */
++	if (nsa310s_wd == NULL)
++		nsa310s_wd = disk_find("wd0");
++	if (nsa310s_wd != NULL && nsa310s_wd->dk_stats != NULL) {
++		volatile uint32_t *dout = (volatile uint32_t *)
++		    (MARVELL_INTERREGS_VBASE + 0x10100);
++		uint64_t x = nsa310s_wd->dk_stats->io_rxfer +
++		    nsa310s_wd->dk_stats->io_wxfer;
++
++		if (x != nsa310s_wd_xfer)
++			*dout &= ~(1U << 16);
++		else
++			*dout |= (1U << 16);
++		nsa310s_wd_xfer = x;
++	}
++	callout_schedule(&nsa310s_btn_ch, hz / 10);
++}
++
++static int
++nsa310s_btn_init(device_t dev)
++{
++	static bool done;
++	uint32_t din = *(volatile uint32_t *)
++	    (MARVELL_INTERREGS_VBASE + 0x10110);
++	int i;
++
++	if (done)
++		return 0;
++	done = true;
++	for (i = 0; i < __arraycount(nsa310s_btn); i++) {
++		nsa310s_btn_down[i] = nsa310s_btn_pressed(din, i);
++		if (sysmon_pswitch_register(&nsa310s_psw[i]) != 0)
++			printf("nsa310s: cannot register %s button\n",
++			    nsa310s_psw[i].smpsw_name);
++	}
++	callout_init(&nsa310s_btn_ch, 0);
++	callout_setfunc(&nsa310s_btn_ch, nsa310s_btn_poll, NULL);
++	callout_schedule(&nsa310s_btn_ch, hz / 10);
++	return 0;
++}
++
++static void
++nsa310s_phyfix(void)
++{
++
++	nsa310s_smi_write(1, 22, 3);		/* page 3: LEDs */
++	nsa310s_smi_write(1, 16, 0x1017);
++	nsa310s_smi_write(1, 17, 0x4408);
++	nsa310s_smi_write(1, 22, 0);		/* back to page 0 */
++}
++#endif
++
+ static void
+ marvell_device_register(device_t dev, void *aux)
+ {
+ 	prop_dictionary_t dict = device_properties(dev);
+ 
++#ifdef NSA310S
++	if (device_is_a(dev, "mvgbec"))
++		nsa310s_phyfix();
++	if (device_is_a(dev, "gpio"))
++		config_finalize_register(dev, nsa310s_btn_init);
++#endif
++
+ #if NCOM > 0
+ 	if (device_is_a(dev, "com") &&
+ 	    device_is_a(device_parent(dev), "mvsoc"))
+--- a/sys/dev/i2c/files.i2c	2025-06-03 21:22:22.000000000 +0200
++++ b/sys/dev/i2c/files.i2c	2026-10-27 16:58:31.342320214 +0100
+@@ -459,3 +459,8 @@
+ device emcfan: gpiobus, sysmon_envsys
+ attach emcfan at iic
+ file dev/i2c/emcfan.c				emcfan
++
++# Holtek HT1382 RTC with wake-up alarm (Zyxel NSA310S)
++device	htrtc
++attach	htrtc at iic
++file	dev/i2c/ht1382.c			htrtc
+--- /dev/null	2026-10-27 08:34:02.578761355 +0100
++++ b/sys/dev/i2c/ht1382.c	2026-10-27 17:10:33.982050772 +0100
+@@ -0,0 +1,263 @@
++/*	$NetBSD$	*/
++
++/*
++ * Holtek HT1382 I2C real-time clock with wake-up alarm
++ * (Zyxel NSA310S: iic0 address 0x68).
++ *
++ * Register layout and sequences taken from the stock Zyxel firmware
++ * (/sbin/rtcAccess):
++ *   0x00 sec, 0x01 min, 0x02 hour (bit 7 = 24h mode), 0x03 day,
++ *   0x04 month, 0x05 weekday, 0x06 year (all BCD, UTC),
++ *   0x07 write protect (bit 7), 0x08/0x09 control (0x80/0xc0),
++ *   0x0b alarm min, 0x0c alarm hour, 0x0d alarm day (bit 7 = enable).
++ *   Reading 0x08 clears the alarm flag.
++ *
++ * The alarm drives the board's power-on logic, so a powered-off NAS
++ * switches itself on at the programmed time.  hw.htrtcN.wakeup takes
++ * a UNIX time (UTC); 0 disables the alarm.
++ */
++
++#include <sys/cdefs.h>
++__KERNEL_RCSID(0, "$NetBSD$");
++
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/device.h>
++#include <sys/kernel.h>
++#include <sys/sysctl.h>
++
++#include <dev/clock_subr.h>
++#include <dev/i2c/i2cvar.h>
++
++#define HTRTC_SEC	0x00
++#define HTRTC_MIN	0x01
++#define HTRTC_HOUR	0x02
++#define  HTRTC_HOUR_24	0x80
++#define HTRTC_DAY	0x03
++#define HTRTC_MONTH	0x04
++#define HTRTC_WDAY	0x05
++#define HTRTC_YEAR	0x06
++#define HTRTC_WP	0x07
++#define HTRTC_CTRL1	0x08		/* read clears the alarm flag */
++#define HTRTC_CTRL2	0x09
++#define HTRTC_AMIN	0x0b
++#define HTRTC_AHOUR	0x0c
++#define HTRTC_ADAY	0x0d
++#define  HTRTC_AEN	0x80
++
++struct htrtc_softc {
++	device_t		sc_dev;
++	i2c_tag_t		sc_tag;
++	i2c_addr_t		sc_addr;
++	struct todr_chip_handle	sc_todr;
++	int64_t			sc_wakeup;
++};
++
++static int	htrtc_match(device_t, cfdata_t, void *);
++static void	htrtc_attach(device_t, device_t, void *);
++
++CFATTACH_DECL_NEW(htrtc, sizeof(struct htrtc_softc),
++    htrtc_match, htrtc_attach, NULL, NULL);
++
++static const struct device_compatible_entry compat_data[] = {
++	{ .compat = "htk,ht1382" },
++	DEVICE_COMPAT_EOL
++};
++
++static int
++htrtc_read(struct htrtc_softc *sc, uint8_t reg, uint8_t *val)
++{
++	return iic_smbus_read_byte(sc->sc_tag, sc->sc_addr, reg, val, 0);
++}
++
++static int
++htrtc_write(struct htrtc_softc *sc, uint8_t reg, uint8_t val)
++{
++	return iic_smbus_write_byte(sc->sc_tag, sc->sc_addr, reg, val, 0);
++}
++
++static int
++htrtc_gettime_ymdhms(todr_chip_handle_t ch, struct clock_ymdhms *dt)
++{
++	struct htrtc_softc *sc = ch->cookie;
++	uint8_t r[7];
++	int error, i;
++
++	if ((error = iic_acquire_bus(sc->sc_tag, 0)) != 0)
++		return error;
++	for (i = 0; i < 7 && error == 0; i++)
++		error = htrtc_read(sc, HTRTC_SEC + i, &r[i]);
++	iic_release_bus(sc->sc_tag, 0);
++	if (error)
++		return error;
++
++	dt->dt_sec = bcdtobin(r[HTRTC_SEC] & 0x7f);
++	dt->dt_min = bcdtobin(r[HTRTC_MIN] & 0x7f);
++	dt->dt_hour = bcdtobin(r[HTRTC_HOUR] & 0x3f);
++	dt->dt_day = bcdtobin(r[HTRTC_DAY] & 0x3f);
++	dt->dt_mon = bcdtobin(r[HTRTC_MONTH] & 0x1f);
++	dt->dt_wday = bcdtobin(r[HTRTC_WDAY] & 0x07) % 7;
++	dt->dt_year = 2000 + bcdtobin(r[HTRTC_YEAR]);
++	return 0;
++}
++
++static int
++htrtc_settime_ymdhms(todr_chip_handle_t ch, struct clock_ymdhms *dt)
++{
++	struct htrtc_softc *sc = ch->cookie;
++	int error;
++
++	if (dt->dt_year < 2000 || dt->dt_year > 2099)
++		return EINVAL;
++	if ((error = iic_acquire_bus(sc->sc_tag, 0)) != 0)
++		return error;
++	error = htrtc_write(sc, HTRTC_WP, 0);
++	if (!error)
++		error = htrtc_write(sc, HTRTC_SEC, bintobcd(dt->dt_sec));
++	if (!error)
++		error = htrtc_write(sc, HTRTC_MIN, bintobcd(dt->dt_min));
++	if (!error)
++		error = htrtc_write(sc, HTRTC_HOUR,
++		    bintobcd(dt->dt_hour) | HTRTC_HOUR_24);
++	if (!error)
++		error = htrtc_write(sc, HTRTC_DAY, bintobcd(dt->dt_day));
++	if (!error)
++		error = htrtc_write(sc, HTRTC_MONTH, bintobcd(dt->dt_mon));
++	if (!error)
++		error = htrtc_write(sc, HTRTC_WDAY, bintobcd(dt->dt_wday));
++	if (!error)
++		error = htrtc_write(sc, HTRTC_YEAR,
++		    bintobcd(dt->dt_year - 2000));
++	iic_release_bus(sc->sc_tag, 0);
++	return error;
++}
++
++/* Program (t != 0) or disable (t == 0) the wake-up alarm. */
++static int
++htrtc_set_alarm(struct htrtc_softc *sc, int64_t t)
++{
++	struct clock_ymdhms dt;
++	uint8_t amin = 0, ahour = 0, aday = 0, dummy;
++	int error;
++
++	if (t != 0) {
++		clock_secs_to_ymdhms((time_t)t, &dt);
++		amin = bintobcd(dt.dt_min) | HTRTC_AEN;
++		ahour = bintobcd(dt.dt_hour) | HTRTC_AEN;
++		aday = bintobcd(dt.dt_day) | HTRTC_AEN;
++	}
++	if ((error = iic_acquire_bus(sc->sc_tag, 0)) != 0)
++		return error;
++	error = htrtc_write(sc, HTRTC_WP, 0);
++	if (!error)
++		error = htrtc_write(sc, HTRTC_AMIN, amin);
++	if (!error)
++		error = htrtc_write(sc, HTRTC_AHOUR, ahour);
++	if (!error)
++		error = htrtc_write(sc, HTRTC_ADAY, aday);
++	if (!error)
++		error = htrtc_read(sc, HTRTC_CTRL1, &dummy);	/* clear AF */
++	iic_release_bus(sc->sc_tag, 0);
++	return error;
++}
++
++static int
++htrtc_sysctl_wakeup(SYSCTLFN_ARGS)
++{
++	struct sysctlnode node = *rnode;
++	struct htrtc_softc *sc = node.sysctl_data;
++	int64_t t = sc->sc_wakeup;
++	int error;
++
++	node.sysctl_data = &t;
++	error = sysctl_lookup(SYSCTLFN_CALL(&node));
++	if (error || newp == NULL)
++		return error;
++	if (t < 0)
++		return EINVAL;
++	if (t != 0 && t <= time_second)
++		return EINVAL;			/* alarm in the past */
++	if (t != 0 && t - time_second > 27 * 86400)
++		return EINVAL;			/* matches day-of-month only */
++	if ((error = htrtc_set_alarm(sc, t)) != 0)
++		return error;
++	sc->sc_wakeup = t;
++	return 0;
++}
++
++static int
++htrtc_match(device_t parent, cfdata_t cf, void *aux)
++{
++	struct i2c_attach_args *ia = aux;
++	int match_result;
++
++	if (iic_use_direct_match(ia, cf, compat_data, &match_result))
++		return match_result;
++	/* indirect config: only the address from the kernel config */
++	if (ia->ia_addr == 0x68)
++		return I2C_MATCH_ADDRESS_ONLY;
++	return 0;
++}
++
++static void
++htrtc_attach(device_t parent, device_t self, void *aux)
++{
++	struct htrtc_softc *sc = device_private(self);
++	struct i2c_attach_args *ia = aux;
++	const struct sysctlnode *node;
++	uint8_t amin, ahour, aday, hour, dummy;
++	int error;
++
++	sc->sc_dev = self;
++	sc->sc_tag = ia->ia_tag;
++	sc->sc_addr = ia->ia_addr;
++
++	aprint_naive("\n");
++	aprint_normal(": HT1382 Real-time Clock\n");
++
++	if (iic_acquire_bus(sc->sc_tag, 0) != 0) {
++		aprint_error_dev(self, "cannot acquire bus\n");
++		return;
++	}
++	error = htrtc_read(sc, HTRTC_AMIN, &amin);
++	if (!error)
++		error = htrtc_read(sc, HTRTC_AHOUR, &ahour);
++	if (!error)
++		error = htrtc_read(sc, HTRTC_ADAY, &aday);
++	if (!error)
++		error = htrtc_read(sc, HTRTC_HOUR, &hour);
++	/* as rtcAccess "init" does: no write protect, 24h mode */
++	if (!error)
++		error = htrtc_write(sc, HTRTC_WP, 0);
++	if (!error && !(hour & HTRTC_HOUR_24))
++		error = htrtc_write(sc, HTRTC_HOUR, hour | HTRTC_HOUR_24);
++	if (!error)
++		error = htrtc_read(sc, HTRTC_CTRL1, &dummy);	/* clear AF */
++	iic_release_bus(sc->sc_tag, 0);
++	if (error) {
++		aprint_error_dev(self, "register access failed (%d)\n",
++		    error);
++		return;
++	}
++	/* the alarm is one-shot: disarm it once we are up */
++	if ((amin | ahour | aday) & HTRTC_AEN) {
++		aprint_normal_dev(self,
++		    "wake-up alarm was set: day %02x %02x:%02x UTC, cleared\n",
++		    aday & 0x3f, ahour & 0x3f, amin & 0x7f);
++		htrtc_set_alarm(sc, 0);
++	}
++
++	sc->sc_todr.cookie = sc;
++	sc->sc_todr.todr_gettime_ymdhms = htrtc_gettime_ymdhms;
++	sc->sc_todr.todr_settime_ymdhms = htrtc_settime_ymdhms;
++	todr_attach(&sc->sc_todr);
++
++	if (sysctl_createv(NULL, 0, NULL, &node, 0, CTLTYPE_NODE,
++	    device_xname(self), SYSCTL_DESCR("HT1382 RTC"),
++	    NULL, 0, NULL, 0, CTL_HW, CTL_CREATE, CTL_EOL) == 0)
++		sysctl_createv(NULL, 0, NULL, NULL,
++		    CTLFLAG_READWRITE, CTLTYPE_QUAD, "wakeup",
++		    SYSCTL_DESCR("Power-on alarm, UNIX time UTC (0 = off)"),
++		    htrtc_sysctl_wakeup, 0, (void *)sc, 0,
++		    CTL_HW, node->sysctl_num, CTL_CREATE, CTL_EOL);
++}
+--- /dev/null	2026-10-27 08:34:02.578761355 +0100
++++ b/sys/arch/evbarm/conf/NSA310S	2026-10-27 16:58:31.369801690 +0100
+@@ -0,0 +1,19 @@
++#	NSA310S
++#
++#	Zyxel NSA310S (Marvell 88F6702 Kirkwood, 1GHz, 256MB, 1x SATA, 1x GbE,
++#	RTC Holtek HT1382 on i2c-0 @ 0x68). Based on MARVELL_NAS.
++#	Boot with the stock Zyxel U-Boot (1.1.x): use netbsd-NSA310S-old.ub.
++
++include 	"arch/evbarm/conf/MARVELL_NAS"
++
++options 	EVBARM_BOARDTYPE=nsa310s
++options 	MSGBUFSIZE=32768
++
++no options 	ORION		# Kirkwood only
++
++# poprawki płyty w marvell_machdep.c: PHY 88E1318S zostawiony przez firmware
++# na stronie 3 (przełącz na 0), wyłączanie zasilania przez GPIO27
++makeoptions	CPPFLAGS+="-DNSA310S"
++
++# zegar Holtek HT1382 z alarmem budzenia
++htrtc0	at iic0 addr 0x68

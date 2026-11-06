@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# PROVIDE: dysk
+# REQUIRE: mountcritlocal
+# BEFORE: mountall mountd nfsd
+#
+# Montuje dysk danych (wedge GPT "nas-dane") w /dysk, jeśli jest podłączony.
+# Bez dysku NAS startuje normalnie (w fstab wpis ma noauto).
+$_rc_subr_loaded . /etc/rc.subr
+
+name="dysk"
+rcvar=$name
+start_cmd="dysk_start"
+stop_cmd=":"
+
+dysk_start()
+{
+	dk=$(dkctl wd0 listwedges 2>/dev/null | awk -F: '/nas-dane/ { print $1; exit }')
+	if [ -z "$dk" ]; then
+		echo "dysk: brak dysku nas-dane – /dysk nie jest montowany"
+		return 0
+	fi
+	fsck_ffs -p /dev/r$dk || { echo "dysk: fsck $dk nieudany"; return 1; }
+	mount /dysk
+}
+
+load_rc_config $name
+run_rc_command "$1"

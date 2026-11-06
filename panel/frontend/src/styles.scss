@@ -1,0 +1,71 @@
+@use '@angular/material' as mat;
+
+// ikony: czcionka przycięta przez narzedzia/przytnij-ikony.py (przed buildem)
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('./czcionki/ikony.woff2') format('woff2');
+}
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal; font-style: normal; font-size: 24px; line-height: 1;
+  letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap;
+  word-wrap: normal; direction: ltr; -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility; font-feature-settings: 'liga';
+}
+
+html {
+  height: 100%;
+  // niebieski w stylu Zyxela, Material 3
+  @include mat.theme((
+    color: (primary: mat.$azure-palette, tertiary: mat.$blue-palette),
+    typography: Roboto,
+    density: 0,
+  ));
+}
+
+body {
+  color-scheme: light dark;
+  background-color: var(--mat-sys-surface-container-low);
+  color: var(--mat-sys-on-surface);
+  font: var(--mat-sys-body-medium);
+  margin: 0;
+  height: 100%;
+}
+
+.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400; }
+
+// wspólne elementy stron
+.strona { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.strona h1 { font: var(--mat-sys-headline-small); margin: 0 0 16px; }
+.siatka { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.karta { background: var(--mat-sys-surface); border-radius: 16px; padding: 16px 20px;
+  border: 1px solid var(--mat-sys-outline-variant); }
+.karta h2 { font: var(--mat-sys-title-medium); margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+.karta h2 .material-symbols-outlined { color: var(--mat-sys-primary); }
+.wiersz { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.wiersz span:first-child { color: var(--mat-sys-on-surface-variant); }
+.wiersz span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.pasek { margin: 6px 0 12px; }
+.mono { font-family: ui-monospace, 'DejaVu Sans Mono', monospace; font-size: 12.5px; }
+.ok { color: #1b7f3b; }
+.zle { color: var(--mat-sys-error); }
+@media (prefers-color-scheme: dark) { .ok { color: #6fdc8c; } }
+@media (max-width: 600px) { .strona { padding: 16px; } }
+
+// wspólne: formularze, przyciski, komunikaty
+.przyciski { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 12px 0 0; }
+.przyciski .material-symbols-outlined, button .material-symbols-outlined { vertical-align: middle; font-size: 20px; }
+.podpowiedz { color: var(--mat-sys-on-surface-variant); margin: 8px 0 0; font: var(--mat-sys-body-small); }
+.pelne { width: 100%; }
+.odstep-gora { margin-top: 16px; }
+.niebezpieczny { --mat-button-filled-container-color: var(--mat-sys-error); --mat-button-filled-label-text-color: var(--mat-sys-on-error); }
+.ostrzezenie { background: var(--mat-sys-error-container); color: var(--mat-sys-on-error-container);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; }
+.info { background: var(--mat-sys-secondary-container); color: var(--mat-sys-on-secondary-container);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }
+.pasek-blad { --mat-snack-bar-container-color: var(--mat-sys-error); --mat-snack-bar-supporting-text-color: var(--mat-sys-on-error); }
+table.mat-mdc-table { background: transparent; width: 100%; }
+textarea.mono { font-family: ui-monospace, 'DejaVu Sans Mono', monospace; }

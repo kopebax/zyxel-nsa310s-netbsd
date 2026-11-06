@@ -1,0 +1,75 @@
+#!/bin/sh
+#
+# Akcja przycisku COPY: kopiuje zawartość pendrive'a/dysku USB na NAS.
+# Konfiguracja: /etc/nas-panel/copy.conf (cel=/dysk/..., tryb=kopia|synchronizacja)
+#   kopia          – każde naciśnięcie do nowego katalogu cel/RRRR-MM-DD_GGMM
+#   synchronizacja – lustro do cel/usb (pliki usunięte z USB znikają też tu)
+# Dioda COPY: miga zielono w trakcie, świeci zielono 10 s po sukcesie,
+# czerwono po błędzie (do następnego naciśnięcia).
+#
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin
+KONF=/etc/nas-panel/copy.conf
+LOG=/var/log/nas-panel/copy.log
+BLOKADA=/var/run/nas-panel/copy.pid
+MNT=/mnt/usb-copy
+
+led() { gpioctl -q gpio0 "$1" "$2" 2>/dev/null; }
+
+mkdir -p /var/log/nas-panel /var/run/nas-panel
+exec >> "$LOG" 2>&1
+echo "=== $(date '+%F %T') COPY"
+
+if [ -f "$BLOKADA" ] && kill -0 "$(cat $BLOKADA)" 2>/dev/null; then
+	echo "kopiowanie już trwa"; exit 0
+fi
+echo $$ > "$BLOKADA"
+
+cel=/dysk/USB-kopie; tryb=kopia
+[ -f "$KONF" ] && . "$KONF"
+
+led copy_red 0
+( while :; do led copy_green 1; sleep 0.4; led copy_green 0; sleep 0.4; done ) &
+mrugacz=$!
+
+koniec() {
+	kill $mrugacz 2>/dev/null; wait $mrugacz 2>/dev/null
+	umount "$MNT" 2>/dev/null
+	rm -f "$BLOKADA"
+	if [ "$1" -eq 0 ]; then
+		echo "OK"; led copy_red 0; led copy_green 1; sleep 10; led copy_green 0
+	else
+		echo "BŁĄD"; led copy_green 0; led copy_red 1
+	fi
+	exit "$1"
+}
+
+# pierwszy dysk USB poza systemowym (sd0)
+usb=""
+for d in $(sysctl -n hw.disknames); do
+	case "$d" in sd0) ;; sd[0-9]*) usb=$d; break ;; esac
+done
+[ -n "$usb" ] || { echo "nie znaleziono pamięci USB"; koniec 1; }
+
+mkdir -p "$MNT"
+zamontowano=0
+for p in e a f i; do
+	for fs in msdos ext2fs ffs ntfs; do
+		if mount -t $fs -o ro /dev/${usb}${p} "$MNT" 2>/dev/null; then
+			echo "zamontowano /dev/${usb}${p} ($fs)"; zamontowano=1; break 2
+		fi
+	done
+done
+[ $zamontowano -eq 1 ] || { echo "nie udało się zamontować $usb"; koniec 1; }
+
+case "$tryb" in
+synchronizacja) docelowy="$cel/usb"; opcje="-rt --delete" ;;
+*) docelowy="$cel/$(date +%F_%H%M)"; opcje="-rt" ;;
+esac
+mkdir -p "$docelowy"
+echo "rsync $opcje -> $docelowy"
+if rsync $opcje --stats "$MNT/" "$docelowy/"; then
+	chown -R admin:users "$docelowy"
+	koniec 0
+else
+	koniec 1
+fi

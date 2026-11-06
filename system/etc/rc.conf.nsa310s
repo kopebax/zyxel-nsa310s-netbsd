@@ -1,0 +1,22 @@
+# Fragment /etc/rc.conf NAS-a NSA310S (dopisany na końcu pliku z instalacji)
+rc_configured=YES
+hostname=nsa310s
+dhcpcd=YES
+dhcpcd_flags="-q mvgbe0"
+sshd=YES
+ntpd=YES
+ntpdate=YES
+no_swap=YES
+savecore=NO
+gpio=YES
+leds=YES
+powerd=YES
+rpcbind=YES
+mountd=YES
+mountd_flags="-p 4002"
+nfs_server=YES
+nfsd_flags="-n 4"
+npf=YES
+naspanel=YES
+naspanel80=YES
+dysk=YES

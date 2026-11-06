@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+# PROVIDE: naspanel
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+#
+# Panel WWW NAS-a: httpd(8) z HTTPS na porcie 443, API w Lua,
+# działa jako użytkownik nasweb.
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="naspanel"
+rcvar=$name
+command="/usr/pkg/libexec/nas-httpd"	# httpd(8) z poprawką czytania treści (system/nas-httpd)
+pidfile="/var/run/${name}.pid"
+start_precmd="naspanel_precmd"
+
+: ${naspanel_www:=/usr/pkg/share/nas-panel/www}
+: ${naspanel_api:=/usr/pkg/share/nas-panel/api.lua}
+: ${naspanel_cert:=/etc/nas-panel/cert.pem}
+: ${naspanel_key:=/etc/nas-panel/key.pem}
+
+command_args="-b -P ${pidfile} -U nasweb -I 443 -n \
+    -M .js text/javascript - - -M .mjs text/javascript - - \
+    -M .woff2 font/woff2 - - -M .woff font/woff - - -M .svg image/svg+xml - - -M .json application/json - - \
+    -Z ${naspanel_cert} ${naspanel_key} \
+    -L api ${naspanel_api} ${naspanel_www}"
+
+naspanel_precmd()
+{
+	# katalog sesji (w /var/run – czyszczony przy starcie systemu)
+	mkdir -p /var/run/nas-panel
+	chown nasweb:nasweb /var/run/nas-panel
+	chmod 700 /var/run/nas-panel
+}
+
+load_rc_config $name
+run_rc_command "$1"

@@ -1,0 +1,61 @@
+@if (ekranLogowania() || !api.zalogowany()) {
+  <router-outlet />
+} @else {
+  <div class="powloka">
+    <mat-toolbar class="gora">
+      @if (waski()) {
+        <button mat-icon-button (click)="boczne.toggle()" [attr.aria-label]="'Menu' | t">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+      }
+      <span class="logo">
+        <span class="material-symbols-outlined">dns</span>
+        <b>NSA310S</b>
+        <span class="podtytul">{{ stan()?.nazwa }}{{ stan() ? ' · ' + stan()?.system : '' }}</span>
+      </span>
+      <span class="odstep"></span>
+      <button mat-button class="jezyk" [matMenuTriggerFor]="jezykMenu">
+        <span class="material-symbols-outlined">translate</span> {{ i18n.jezyk().toUpperCase() }}
+      </button>
+      <mat-menu #jezykMenu="matMenu">
+        @for (j of jezyki; track j.kod) {
+          <button mat-menu-item (click)="i18n.jezyk.set(j.kod)">{{ j.nazwa }}</button>
+        }
+      </mat-menu>
+      <span class="kto"><span class="material-symbols-outlined">account_circle</span>{{ api.uzytkownik() }}</span>
+      <button mat-icon-button [matTooltip]="'Wyloguj' | t" (click)="api.wyloguj()" [attr.aria-label]="'Wyloguj' | t">
+        <span class="material-symbols-outlined">logout</span>
+      </button>
+    </mat-toolbar>
+
+    <mat-sidenav-container class="srodek">
+      <mat-sidenav #boczne [mode]="waski() ? 'over' : 'side'" [opened]="!waski()" class="boczne">
+        @for (g of menu(); track g.nazwa) {
+          <div class="grupa">{{ g.nazwa | t }}</div>
+          <mat-nav-list>
+            @for (p of g.pozycje; track p.sciezka) {
+              <a mat-list-item [routerLink]="p.sciezka" routerLinkActive="aktywna"
+                 [routerLinkActiveOptions]="{ exact: true }" (click)="waski() && boczne.close()">
+                <span matListItemIcon class="material-symbols-outlined">{{ p.ikona }}</span>
+                <span matListItemTitle>{{ p.nazwa | t }}</span>
+              </a>
+            }
+          </mat-nav-list>
+        }
+      </mat-sidenav>
+      <mat-sidenav-content>
+        <router-outlet />
+      </mat-sidenav-content>
+    </mat-sidenav-container>
+
+    <footer class="stopka">
+      @if (stan(); as s) {
+        <span><span class="kropka" [class.wl]="s.siec.status === 'active'"></span>
+          {{ s.siec.ip ?? '—' }} · {{ s.siec.media ?? '' }}</span>
+        <span>{{ 'Działa' | t }}: {{ dzialanie() || '—' }}</span>
+      }
+      <span class="odstep"></span>
+      <span>{{ godzina() }}</span>
+    </footer>
+  </div>
+}

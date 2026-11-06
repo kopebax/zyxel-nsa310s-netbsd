@@ -1,0 +1,35 @@
+.powloka { display: flex; flex-direction: column; height: 100vh; }
+
+// górny pasek: ciemnoniebieski gradient jak w panelu Zyxela
+.gora {
+  background: linear-gradient(90deg, #0a3d74, #0b5cad 60%, #1679d4);
+  color: #fff;
+  --mat-icon-button-icon-color: #fff;
+  flex: none;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-size: 18px; letter-spacing: .5px; }
+.podtytul { font-size: 13px; opacity: .8; font-weight: 400; }
+.odstep { flex: 1; }
+
+.srodek { flex: 1; }
+.boczne { width: 232px; background: var(--mat-sys-surface); border-right: 1px solid var(--mat-sys-outline-variant); }
+.grupa {
+  font: var(--mat-sys-label-medium); text-transform: uppercase; letter-spacing: .6px;
+  color: var(--mat-sys-on-surface-variant); padding: 12px 20px 2px;
+}
+.aktywna { background: var(--mat-sys-secondary-container); border-radius: 0 24px 24px 0; }
+mat-nav-list { padding-top: 0; --mat-list-list-item-one-line-container-height: 40px; }
+mat-nav-list a { margin-right: 8px; }
+
+.stopka {
+  flex: none; display: flex; gap: 20px; align-items: center; padding: 6px 16px;
+  font: var(--mat-sys-body-small); color: var(--mat-sys-on-surface-variant);
+  background: var(--mat-sys-surface-container); border-top: 1px solid var(--mat-sys-outline-variant);
+}
+.kropka { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #999; margin-right: 6px; }
+.kropka.wl { background: #2fb35a; }
+@media (max-width: 600px) { .podtytul { display: none; } }
+
+.jezyk { color: #fff; --mat-button-text-label-text-color: #fff; }
+.kto { display: flex; align-items: center; gap: 6px; font-size: 14px; margin: 0 8px; opacity: .9; }
+@media (max-width: 600px) { .kto { display: none; } }

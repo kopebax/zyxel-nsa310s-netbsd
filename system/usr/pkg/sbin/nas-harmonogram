@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# nas-harmonogram – harmonogram zasilania jak w panelu Zyxela.
+# /etc/nas-panel/harmonogram: wiersze "wlacz|wylacz|restart DNI HH:MM",
+# DNI = 1-7 po przecinku (1 = poniedziałek), czas lokalny.
+#
+#   nas-harmonogram uzbroj  – ustaw budzik RTC na najbliższe "wlacz"
+#                             (cron @reboot, po zmianie harmonogramu, przed wyłączeniem)
+#   nas-harmonogram teraz   – cron co minutę: wykonaj "wylacz"/"restart" o tej minucie
+#
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin
+PLIK=/etc/nas-panel/harmonogram
+
+[ -f "$PLIK" ] || { [ "$1" = uzbroj ] && sysctl -w hw.htrtc0.wakeup=0 >/dev/null; exit 0; }
+
+najblizsze_wlaczenie() {
+	teraz=$(date +%s)
+	najlepsze=0
+	d=0
+	while [ $d -le 7 ]; do
+		dzien=$(date -r $((teraz + d * 86400)) +%Y-%m-%d)
+		dtyg=$(date -r $((teraz + d * 86400)) +%u)
+		while read typ dni godz; do
+			[ "$typ" = wlacz ] || continue
+			case ",$dni," in *",$dtyg,"*) ;; *) continue ;; esac
+			t=$(date -d "$dzien $godz" +%s 2>/dev/null) || continue
+			# co najmniej 3 minuty naprzód (czas na wyłączenie)
+			[ "$t" -gt $((teraz + 180)) ] || continue
+			if [ "$najlepsze" -eq 0 ] || [ "$t" -lt "$najlepsze" ]; then
+				najlepsze=$t
+			fi
+		done < "$PLIK"
+		[ "$najlepsze" -ne 0 ] && break
+		d=$((d + 1))
+	done
+	echo "$najlepsze"
+}
+
+case "$1" in
+uzbroj)
+	t=$(najblizsze_wlaczenie)
+	sysctl -w hw.htrtc0.wakeup="$t" >/dev/null || exit 1
+	[ "$t" -ne 0 ] && logger -p info "nas-harmonogram: budzenie $(date -r $t '+%a %F %R')"
+	exit 0
+	;;
+teraz)
+	dtyg=$(date +%u); godz=$(date +%H:%M)
+	while read typ dni g; do
+		[ "$g" = "$godz" ] || continue
+		case ",$dni," in *",$dtyg,"*) ;; *) continue ;; esac
+		case "$typ" in
+		wylacz)
+			logger -p notice "nas-harmonogram: wylaczenie wg harmonogramu"
+			"$0" uzbroj
+			gpioctl -q gpio0 sys_green 0; gpioctl -q gpio0 sys_orange 1
+			shutdown -p now "harmonogram"
+			exit 0 ;;
+		restart)
+			logger -p notice "nas-harmonogram: restart wg harmonogramu"
+			shutdown -r now "harmonogram"
+			exit 0 ;;
+		esac
+	done < "$PLIK"
+	;;
+*)
+	echo "użycie: $0 uzbroj|teraz" >&2; exit 1 ;;
+esac

@@ -1,0 +1,10 @@
+# frontend
+panel/frontend/node_modules/
+panel/frontend/dist/
+panel/frontend/.angular/
+# nigdy nie commitować sekretów
+*.pass
+*.pem
+*.key
+haslo
+system/nas-httpd/nas-httpd

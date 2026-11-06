@@ -1,0 +1,620 @@
+#!/bin/sh
+#
+# nas-panel-priv – jedyny program, który panel WWW (użytkownik nasweb)
+# może uruchomić jako root (doas.conf: permit nopass nasweb cmd ...).
+#
+# Każde polecenie ma zamkniętą listę dopuszczalnych argumentów; dane
+# wielowierszowe (udziały, zapora, harmonogram, klucze ssh) przychodzą na
+# stdin i są sprawdzane wiersz po wierszu przed zapisaniem.
+#
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin
+export PATH
+umask 022
+
+KONF=/etc/nas-panel
+STAN=/var/run/nas-panel
+LOGI=/var/log/nas-panel
+mkdir -p "$LOGI"
+
+blad() { echo "$*" >&2; exit 2; }
+
+# --- walidatory -----------------------------------------------------------
+jest_ip4() {
+	echo "$1" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
+	for o in $(echo "$1" | tr . ' '); do [ "$o" -le 255 ] || return 1; done
+}
+jest_ip4_lub_siec() {
+	case "$1" in
+	*/*) jest_ip4 "${1%/*}" && echo "${1#*/}" | grep -Eq '^([0-9]|[12][0-9]|3[0-2])$' ;;
+	*) jest_ip4 "$1" ;;
+	esac
+}
+jest_nazwa() { echo "$1" | grep -Eq '^[a-z][a-z0-9_-]{0,30}$'; }
+jest_liczba() { echo "$1" | grep -Eq '^[0-9]+$'; }
+# katalog udziału: tylko pod /dysk, bez .., bez spacji
+jest_katalog() {
+	echo "$1" | grep -Eq '^/dysk(/[A-Za-z0-9._-]+)+$' || return 1
+	case "$1" in */..*|*/.) return 1 ;; esac
+}
+
+# zmienna w rc.conf: ustaw (albo dopisz)
+rcconf_ustaw() {
+	if grep -q "^$1=" /etc/rc.conf; then
+		sed -i "s|^$1=.*|$1=$2|" /etc/rc.conf
+	else
+		echo "$1=$2" >> /etc/rc.conf
+	fi
+}
+
+# --- usługi (zamknięta lista) ----------------------------------------------
+# nazwa w panelu -> skrypty rc.d i zmienne rc.conf
+uslugi_rc() {
+	case "$1" in
+	nfs)	echo "rpcbind mountd nfsd" ;;
+	ntpd)	echo "ntpd" ;;
+	sshd)	echo "sshd" ;;
+	powerd)	echo "powerd" ;;
+	cron)	echo "cron" ;;
+	naspanel) echo "naspanel" ;;
+	*)	return 1 ;;
+	esac
+}
+uslugi_zmienne() {
+	case "$1" in
+	nfs)	echo "rpcbind mountd nfs_server" ;;
+	*)	echo "$1" ;;
+	esac
+}
+
+polecenie="$1"; shift
+case "$polecenie" in
+
+# --- odczyty ---------------------------------------------------------------
+# SMART przez atactl(8): smartctl na mvsata zawiesza kolejkę komend ATA
+# (cały /dysk stoi do restartu) – patrz docs/sprzet.md
+smart)	atactl wd0 identify; atactl wd0 smart status 2>&1; atactl wd0 smart selftest-log ;;
+smart-test)
+	atactl wd0 smart offline 1 && echo "Krótki test uruchomiony (ok. 2 minuty)" ;;
+leds)
+	for p in sys_green sys_orange hdd_green hdd_red usb_green copy_green copy_red; do
+		gpioctl gpio0 "$p" 2>/dev/null
+	done ;;
+log)
+	n=${2:-200}; jest_liczba "$n" || n=200; [ "$n" -gt 2000 ] && n=2000
+	case "$1" in
+	messages)	tail -n "$n" /var/log/messages ;;
+	authlog)	tail -n "$n" /var/log/authlog ;;
+	fsck|copy|aktualizacja) tail -n "$n" "$LOGI/$1.log" 2>/dev/null ;;
+	*) blad "nieznany dziennik" ;;
+	esac ;;
+firewall)
+	npfctl show | head -2
+	echo "--- dom"; cat /etc/npf.d/dom 2>/dev/null
+	echo "--- nfs"; cat /etc/npf.d/nfs 2>/dev/null ;;
+uslugi)
+	for u in nfs ntpd sshd powerd cron naspanel; do
+		# wartość z /etc/defaults/rc.conf nadpisana przez /etc/rc.conf
+		wl=1
+		for z in $(uslugi_zmienne $u); do
+			v=$(sh -c ". /etc/defaults/rc.conf; . /etc/rc.conf; eval echo \\\$$z" 2>/dev/null)
+			case "$v" in [Yy][Ee][Ss]) ;; *) wl=0 ;; esac
+		done
+		dz=1
+		for s in $(uslugi_rc $u); do
+			/etc/rc.d/$s status >/dev/null 2>&1 || dz=0
+		done
+		echo "$u $dz $wl"
+	done ;;
+uzytkownicy)
+	# nazwa uid grupy klucze_ssh
+	awk -F: '$3 >= 1000 && $3 < 30000 && $1 != "nasweb" { print $1, $3 }' /etc/passwd | while read u id; do
+		g=$(id -Gn "$u" | tr ' ' ',')
+		k=0; [ -f "/home/$u/.ssh/authorized_keys" ] && k=$(grep -c '^ssh-' "/home/$u/.ssh/authorized_keys")
+		h=0; grep -q "^$u " $KONF/hasla 2>/dev/null && h=1
+		echo "$u $id $g $k $h"
+	done ;;
+siec)
+	echo "dhcp $(grep -Eq '^dhcpcd=(YES|yes)' /etc/rc.conf && echo 1 || echo 0)"
+	[ -f /etc/ifconfig.mvgbe0 ] && echo "statyczny $(cat /etc/ifconfig.mvgbe0)"
+	echo "brama $(route -n get default 2>/dev/null | awk '/gateway/ {print $2}')"
+	grep '^nameserver' /etc/resolv.conf
+	[ -f "$STAN/siec-cofniecie" ] && echo "oczekuje_potwierdzenia $(cat $STAN/siec-cofniecie)" ;;
+czas)
+	echo "strefa $(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
+	echo "nazwa $(hostname)"
+	grep -E '^(server|pool) ' /etc/ntp.conf
+	ntpq -pn 2>/dev/null | awk 'NR > 2 && /^\*/ { print "synchronizacja", $1, $9 }' ;;
+cert)	openssl x509 -in $KONF/cert.pem -noout -subject -enddate -ext subjectAltName -fingerprint -sha256 2>/dev/null ;;
+aktualizacje-sprawdz)
+	# w tle (pkgin na ARM-ie trwa kilka minut); wynik w $LOGI/aktualizacje-stan.txt
+	# każdy krok z limitem czasu – zawieszone pobieranie nie blokuje panelu
+	S="$LOGI/aktualizacje-stan.txt"
+	if grep -q '^trwa' "$S" 2>/dev/null; then
+		od=$(awk '{print $2}' "$S")
+		[ $(( $(date +%s) - ${od:-0} )) -lt 1800 ] && exit 0
+	fi
+	echo "trwa $(date +%s)" > "$S"
+	nohup sh -c '
+		t=$(mktemp)
+		echo "sprawdzono $(date +%s)" > $t
+		if ! timeout 900 pkgin -y update >/dev/null 2>&1; then
+			echo "--- blad" >> $t; echo "pkgin update: brak odpowiedzi serwera pakietów (limit 15 min)" >> $t
+		fi
+		echo "--- do aktualizacji" >> $t
+		timeout 600 pkgin -n upgrade 2>/dev/null | grep -E "^ *[a-zA-Z0-9].*-[0-9][^ ]* " | head -50 >> $t
+		echo "--- audyt" >> $t
+		timeout 300 pkg_admin fetch-pkg-vulnerabilities >/dev/null 2>&1
+		timeout 300 pkg_admin audit 2>/dev/null | head -50 >> $t
+		echo "--- koniec" >> $t
+		mv $t '"$S"'; chmod 644 '"$S"'
+	' </dev/null >/dev/null 2>&1 & ;;
+fsck-stan)
+	[ -f "$STAN/fsck.pid" ] && kill -0 "$(cat $STAN/fsck.pid)" 2>/dev/null && echo "trwa" || echo "bezczynny"
+	tail -n 30 "$LOGI/fsck.log" 2>/dev/null ;;
+kopia-konfiguracji)
+	# bez sekretów: klucze ssh hosta, klucz TLS, hasła panelu, master.passwd
+	printf 'nsa310s-kopia 1\nnazwa %s\ndata %s\nsystem %s\n' "$(hostname)" "$(date +%s)" "$(uname -sr)" \
+	    > $KONF/kopia-info
+	# tar | gzip zamiast tar -z: bez dopełnienia zerami za strumieniem gzip
+	tar -C / -cf - --exclude 'etc/ssh/ssh_host_*_key' --exclude 'etc/nas-panel/key.pem' \
+	    --exclude 'etc/nas-panel/haslo' --exclude 'etc/nas-panel/hasla' --exclude 'etc/master.passwd' \
+	    --exclude 'etc/spwd.db' --exclude 'etc/samba/private' etc usr/pkg/etc 2>/dev/null | gzip -c ;;
+kopia-sprawdz|kopia-przywroc)
+	# $1 = id wgranego pliku (hex) w $STAN; weryfikacja przed przywróceniem
+	echo "$1" | grep -Eq '^[0-9a-f]{32}$' || blad "zły identyfikator pliku"
+	plik="$STAN/wgrane-$1"
+	[ -f "$plik" ] || blad "nie ma wgranego pliku"
+	# (kopie z tar -z mają dopełnienie zerami – gzip -t je odrzuca, tar nie)
+	lista=$(mktemp)
+	tar -tvzf "$plik" > "$lista" 2>/dev/null && [ -s "$lista" ] || \
+	    { rm -f "$lista"; blad "plik nie jest poprawnym archiwum .tar.gz"; }
+	# tylko pliki i katalogi (bez dowiązań, urządzeń) w etc/ i usr/pkg/etc/, bez ..
+	zle=$(awk '{ t = substr($1, 1, 1); n = $NF;
+		if (t != "-" && t != "d") print "typ " t ": " n;
+		else if (n !~ /^(etc|usr\/pkg\/etc)(\/|$)/ || n ~ /(^|\/)\.\.(\/|$)/) print "ścieżka: " n }' "$lista" | head -5)
+	# dowiązania (np. etc/localtime) są w kopii normalne – pomijamy je przy przywracaniu
+	zle=$(echo "$zle" | grep -v '^typ l: ')
+	[ -n "$zle" ] && { rm -f "$lista"; blad "niedozwolona zawartość: $zle"; }
+	grep -q ' etc/nas-panel/kopia-info$' "$lista" || { rm -f "$lista"; blad "to nie jest kopia konfiguracji z panelu NSA310S"; }
+	info=$(tar -xOzf "$plik" etc/nas-panel/kopia-info 2>/dev/null)
+	echo "$info" | grep -q '^nsa310s-kopia 1' || { rm -f "$lista"; blad "nieznana wersja kopii"; }
+	# pliki, których nie przywracamy (konta, sekrety, urządzenia systemu)
+	POMIN='^(etc/(passwd|group|pwd\.db|spwd\.db|master\.passwd|ssh/ssh_host_.*|nas-panel/(key|cert)\.pem|nas-panel/hasl.*|fstab)|.*/)$'
+	rozp=$(mktemp -d)
+	tar -C "$rozp" -xpzf "$plik" 2>/dev/null
+	zmienione=0; nowe=0
+	wynik=$(mktemp)
+	awk 'substr($1,1,1) == "-" { print $NF }' "$lista" | grep -Ev "$POMIN" | while read f; do
+		if [ ! -f "/$f" ]; then echo "nowy $f"
+		elif ! cmp -s "$rozp/$f" "/$f"; then echo "zmieniony $f"
+		fi
+	done > "$wynik"
+	echo "$info"
+	echo "plikow $(awk 'substr($1,1,1) == "-"' "$lista" | wc -l | tr -d ' ')"
+	if [ "$polecenie" = kopia-sprawdz ]; then
+		cat "$wynik"
+	else
+		mkdir -p /var/backups/nas-panel
+		kop="/var/backups/nas-panel/przed-przywroceniem-$(date +%Y%m%d-%H%M%S).tar.gz"
+		tar -C / -czf "$kop" etc usr/pkg/etc 2>/dev/null
+		awk '{ print $2 }' "$wynik" | while read f; do
+			mkdir -p "$(dirname "/$f")"
+			cp -p "$rozp/$f" "/$f"
+		done
+		logger -p notice "nas-panel: przywrocono konfiguracje ($(wc -l < "$wynik" | tr -d ' ') plikow), kopia poprzedniej: $kop"
+		echo "przywrocono $(wc -l < "$wynik" | tr -d ' ')"
+		echo "kopia $kop"
+		rm -f "$plik"
+	fi
+	rm -rf "$rozp" "$lista" "$wynik" ;;
+wgrane-usun)
+	echo "$1" | grep -Eq '^[0-9a-f]{32}$' && rm -f "$STAN/wgrane-$1" ;;
+
+# --- zasilanie ---------------------------------------------------------------
+wakeup)
+	jest_liczba "$1" || blad "zły czas"
+	sysctl -w hw.htrtc0.wakeup="$1" ;;
+shutdown)
+	logger -p notice "nas-panel: wylaczenie z panelu WWW"
+	/usr/pkg/sbin/nas-harmonogram uzbroj >/dev/null 2>&1
+	nohup shutdown -p +0 "panel WWW" </dev/null >/dev/null 2>&1 & ;;
+reboot)
+	logger -p notice "nas-panel: restart z panelu WWW"
+	nohup shutdown -r +0 "panel WWW" </dev/null >/dev/null 2>&1 & ;;
+harmonogram-uzbroj)
+	/usr/pkg/sbin/nas-harmonogram uzbroj ;;
+harmonogram-ustaw)
+	# stdin: wiersze "wlacz|wylacz|restart DNI HH:MM", DNI = 1-7 po przecinku (1 = pn)
+	t=$(mktemp)
+	while read typ dni godz; do
+		[ -z "$typ" ] && continue
+		case "$typ" in wlacz|wylacz|restart) ;; *) rm -f "$t"; blad "zły typ: $typ" ;; esac
+		echo "$dni" | grep -Eq '^[1-7](,[1-7])*$' || { rm -f "$t"; blad "złe dni: $dni"; }
+		echo "$godz" | grep -Eq '^([01][0-9]|2[0-3]):[0-5][0-9]$' || { rm -f "$t"; blad "zła godzina: $godz"; }
+		echo "$typ $dni $godz" >> "$t"
+	done
+	[ "$(wc -l < "$t")" -le 21 ] || { rm -f "$t"; blad "za dużo wpisów"; }
+	mv "$t" $KONF/harmonogram; chmod 644 $KONF/harmonogram
+	/usr/pkg/sbin/nas-harmonogram uzbroj ;;
+
+dysk-usypianie)
+	# $1 = minuty bezczynności przed uśpieniem dysku (0 = nigdy, maks. 300)
+	jest_liczba "$1" && [ "$1" -le 300 ] || blad "zła liczba minut"
+	echo "$1" > $KONF/usypianie; chmod 644 $KONF/usypianie
+	if [ "$1" -eq 0 ]; then atactl wd0 setidle 0; else atactl wd0 setidle $(( $1 * 60 )); fi ;;
+
+# --- usługi ----------------------------------------------------------------
+usluga)
+	rc=$(uslugi_rc "$1") || blad "nieznana usługa"
+	case "$2" in
+	start|stop|restart) ;;
+	*) blad "zła akcja" ;;
+	esac
+	# ssh i panel można tylko restartować (inaczej odcięcie dostępu)
+	case "$1:$2" in sshd:stop|naspanel:stop) blad "tej usługi nie można zatrzymać z panelu" ;; esac
+	if [ "$1" = naspanel ]; then
+		nohup sh -c "sleep 1; /etc/rc.d/naspanel restart" </dev/null >/dev/null 2>&1 &
+		exit 0
+	fi
+	if [ "$2" = stop ]; then
+		# zatrzymanie w odwrotnej kolejności (nfsd, mountd, rpcbind)
+		for s in $(echo $rc | awk '{ for (i = NF; i > 0; i--) printf "%s ", $i }'); do /etc/rc.d/$s onestop; done
+	else
+		for s in $rc; do /etc/rc.d/$s one$2; done
+	fi ;;
+usluga-autostart)
+	uslugi_rc "$1" >/dev/null || blad "nieznana usługa"
+	case "$1" in sshd|naspanel) blad "ta usługa musi startować zawsze" ;; esac
+	case "$2" in YES|NO) ;; *) blad "zła wartość" ;; esac
+	for z in $(uslugi_zmienne "$1"); do rcconf_ustaw "$z" "$2"; done ;;
+
+# --- udziały NFS + tabela zapory <nfs> -----------------------------------------
+udzialy-ustaw)
+	# stdin: wiersze "KATALOG ro|rw KLIENT[,KLIENT...]", klient = IP albo sieć CIDR
+	t=$(mktemp); k=$(mktemp)
+	echo "# /etc/exports – generowany przez panel NAS (nie edytować ręcznie)" > "$t"
+	while read kat tryb klienci; do
+		[ -z "$kat" ] && continue
+		jest_katalog "$kat" || { rm -f "$t" "$k"; blad "zły katalog: $kat"; }
+		case "$tryb" in ro) opt="-ro " ;; rw) opt="" ;; *) rm -f "$t" "$k"; blad "zły tryb"; ;; esac
+		hosty=""
+		for c in $(echo "$klienci" | tr ',' ' '); do
+			jest_ip4_lub_siec "$c" || { rm -f "$t" "$k"; blad "zły klient: $c"; }
+			echo "$c" >> "$k"
+			case "$c" in
+			*/*) echo "$kat ${opt}-maproot=nobody -network $c" >> "$t" ;;
+			*) hosty="$hosty $c" ;;
+			esac
+		done
+		[ -n "$hosty" ] && echo "$kat ${opt}-maproot=nobody$hosty" >> "$t"
+		mkdir -p "$kat"
+	done
+	cp /etc/exports /etc/exports.poprzedni 2>/dev/null
+	mv "$t" /etc/exports; chmod 644 /etc/exports
+	sort -u "$k" > /etc/npf.d/nfs; rm -f "$k"
+	/etc/rc.d/mountd reload >/dev/null 2>&1
+	/sbin/npfctl reload ;;
+katalog-utworz)
+	jest_katalog "$1" || blad "zły katalog"
+	mkdir -p "$1" && chown admin:users "$1" ;;
+
+# --- zapora: sieci z dostępem do ssh/panelu --------------------------------
+zapora-ustaw)
+	# $1 = adres klienta panelu (musi zostać dopuszczony); stdin: sieci/hosty
+	jest_ip4 "$1" || blad "zły adres klienta"
+	t=$(mktemp)
+	while read c; do
+		[ -z "$c" ] && continue
+		jest_ip4_lub_siec "$c" || { rm -f "$t"; blad "zły wpis: $c"; }
+		echo "$c" >> "$t"
+	done
+	[ -s "$t" ] || { rm -f "$t"; blad "lista nie może być pusta"; }
+	cp /etc/npf.d/dom /etc/npf.d/dom.poprzedni
+	sort -u "$t" > /etc/npf.d/dom; rm -f "$t"
+	/sbin/npfctl reload
+	# ochrona przed odcięciem: czy klient panelu nadal ma dostęp
+	if ! /sbin/npfctl table dom test "$1" >/dev/null 2>&1; then
+		cp /etc/npf.d/dom.poprzedni /etc/npf.d/dom; /sbin/npfctl reload
+		blad "zmiana odcięłaby Twój komputer ($1) – cofnięto"
+	fi ;;
+
+# --- system: nazwa, strefa, NTP --------------------------------------------
+nazwa-ustaw)
+	echo "$1" | grep -Eq '^[a-z][a-z0-9-]{0,30}$' || blad "zła nazwa"
+	echo "$1" > /etc/myname; rcconf_ustaw hostname "$1"; hostname "$1" ;;
+strefa-ustaw)
+	echo "$1" | grep -Eq '^[A-Za-z_]+(/[A-Za-z_+-]+){0,2}$' || blad "zła strefa"
+	[ -f "/usr/share/zoneinfo/$1" ] || blad "nie ma takiej strefy"
+	ln -sf "/usr/share/zoneinfo/$1" /etc/localtime ;;
+ntp-ustaw)
+	# stdin: serwery (nazwy DNS albo IP), jeden w wierszu
+	t=$(mktemp); sed '/^\(server\|pool\) /d' /etc/ntp.conf > "$t"
+	n=0
+	while read s; do
+		[ -z "$s" ] && continue
+		echo "$s" | grep -Eq '^[A-Za-z0-9.-]{1,253}$' || { rm -f "$t"; blad "zły serwer: $s"; }
+		echo "pool $s iburst" >> "$t"; n=$((n + 1))
+	done
+	[ "$n" -ge 1 ] || { rm -f "$t"; blad "podaj co najmniej jeden serwer"; }
+	mv "$t" /etc/ntp.conf; chmod 644 /etc/ntp.conf
+	/etc/rc.d/ntpd restart >/dev/null 2>&1 ;;
+
+# --- sieć TCP/IP z automatycznym cofnięciem ---------------------------------
+siec-ustaw)
+	# $1 = dhcp | static; dla static: $2 ip/prefiks, $3 brama, $4 dns
+	mkdir -p "$STAN/siec-kopia"
+	cp -p /etc/rc.conf /etc/resolv.conf "$STAN/siec-kopia/"
+	[ -f /etc/ifconfig.mvgbe0 ] && cp -p /etc/ifconfig.mvgbe0 "$STAN/siec-kopia/"
+	[ -f /etc/mygate ] && cp -p /etc/mygate "$STAN/siec-kopia/"
+	case "$1" in
+	dhcp)
+		rm -f /etc/ifconfig.mvgbe0 /etc/mygate
+		rcconf_ustaw dhcpcd YES ;;
+	static)
+		jest_ip4_lub_siec "$2" && case "$2" in */*) ;; *) false ;; esac || blad "zły adres (IP/prefiks)"
+		jest_ip4 "$3" || blad "zła brama"
+		jest_ip4 "$4" || blad "zły DNS"
+		echo "inet $2" > /etc/ifconfig.mvgbe0
+		echo "$3" > /etc/mygate
+		echo "nameserver $4" > /etc/resolv.conf
+		rcconf_ustaw dhcpcd NO ;;
+	*) blad "zły tryb" ;;
+	esac
+	date +%s > "$STAN/siec-cofniecie"
+	# zastosuj i daj 3 minuty na potwierdzenie z nowego adresu
+	nohup sh -c '
+		sleep 2
+		/etc/rc.d/dhcpcd stop >/dev/null 2>&1
+		/etc/rc.d/network restart >/dev/null 2>&1
+		grep -Eq "^dhcpcd=(YES|yes)" /etc/rc.conf && /etc/rc.d/dhcpcd start >/dev/null 2>&1
+		sleep 180
+		if [ -f '"$STAN"'/siec-cofniecie ]; then
+			logger -p warning "nas-panel: brak potwierdzenia nowej konfiguracji sieci - cofam"
+			cp -p '"$STAN"'/siec-kopia/* /etc/
+			[ -f '"$STAN"'/siec-kopia/ifconfig.mvgbe0 ] || rm -f /etc/ifconfig.mvgbe0
+			[ -f '"$STAN"'/siec-kopia/mygate ] || rm -f /etc/mygate
+			rm -f '"$STAN"'/siec-cofniecie
+			/etc/rc.d/dhcpcd stop >/dev/null 2>&1
+			/etc/rc.d/network restart >/dev/null 2>&1
+			grep -Eq "^dhcpcd=(YES|yes)" /etc/rc.conf && /etc/rc.d/dhcpcd start >/dev/null 2>&1
+		fi
+	' </dev/null >/dev/null 2>&1 & ;;
+siec-potwierdz)
+	rm -f "$STAN/siec-cofniecie"; logger -p notice "nas-panel: nowa konfiguracja sieci potwierdzona" ;;
+
+# --- użytkownicy -------------------------------------------------------------
+uzytkownik-dodaj)
+	jest_nazwa "$1" || blad "zła nazwa użytkownika"
+	id "$1" >/dev/null 2>&1 && blad "użytkownik już istnieje"
+	useradd -m -g users -s /bin/sh -c "$1" "$1" ;;
+uzytkownik-usun)
+	jest_nazwa "$1" || blad "zła nazwa"
+	case "$1" in admin|nasweb|root) blad "tego konta nie można usunąć" ;; esac
+	uid=$(id -u "$1" 2>/dev/null) || blad "nie ma takiego użytkownika"
+	[ "$uid" -ge 1000 ] || blad "konto systemowe"
+	userdel "$1"
+	t=$(mktemp); grep -v "^$1 " $KONF/hasla > "$t" 2>/dev/null; chown root:nasweb "$t"; chmod 640 "$t"; mv "$t" $KONF/hasla
+	[ -x /usr/pkg/bin/smbpasswd ] && /usr/pkg/bin/smbpasswd -x "$1" >/dev/null 2>&1
+	/usr/pkg/sbin/nas-udzialy-zastosuj >/dev/null 2>&1 ;;
+uzytkownik-klucze)
+	# stdin: klucze publiczne ssh (ssh-ed25519/ssh-rsa/ecdsa-...), jeden w wierszu
+	jest_nazwa "$1" || blad "zła nazwa"
+	uid=$(id -u "$1" 2>/dev/null) || blad "nie ma takiego użytkownika"
+	[ "$uid" -ge 1000 ] || blad "konto systemowe"
+	t=$(mktemp)
+	while read typ klucz opis; do
+		[ -z "$typ" ] && continue
+		case "$typ" in ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh.com) ;;
+		*) rm -f "$t"; blad "zły typ klucza" ;; esac
+		echo "$klucz" | grep -Eq '^[A-Za-z0-9+/]+=*$' || { rm -f "$t"; blad "zły klucz"; }
+		opis=$(echo "$opis" | tr -cd 'A-Za-z0-9@._-' | cut -c1-60)
+		echo "$typ $klucz $opis" >> "$t"
+	done
+	[ "$1" = admin ] && [ ! -s "$t" ] && { rm -f "$t"; blad "konto admin musi mieć klucz (dostęp ssh)"; }
+	mkdir -p "/home/$1/.ssh"; mv "$t" "/home/$1/.ssh/authorized_keys"
+	chown -R "$1:users" "/home/$1/.ssh"; chmod 700 "/home/$1/.ssh"; chmod 600 "/home/$1/.ssh/authorized_keys" ;;
+uzytkownik-klucze-pokaz)
+	jest_nazwa "$1" || blad "zła nazwa"
+	cat "/home/$1/.ssh/authorized_keys" 2>/dev/null ;;
+
+# --- dysk: fsck --------------------------------------------------------------
+fsck-dysk)
+	[ -f "$STAN/fsck.pid" ] && kill -0 "$(cat $STAN/fsck.pid)" 2>/dev/null && blad "sprawdzanie już trwa"
+	nohup sh -c '
+		echo "=== $(date) start: zatrzymuję NFS, odmontowuję /dysk"
+		/etc/rc.d/nfsd onestop; /etc/rc.d/mountd onestop
+		if umount /dysk; then
+			fsck_ffs -f -y /dev/rdk0; echo "fsck: kod $?"
+			mount /dysk && echo "zamontowano /dysk"
+		else
+			echo "BŁĄD: nie można odmontować /dysk (pliki w użyciu)"
+		fi
+		/etc/rc.d/mountd onestart; /etc/rc.d/nfsd onestart
+		echo "=== $(date) koniec"
+	' </dev/null >"$LOGI/fsck.log" 2>&1 &
+	echo $! > "$STAN/fsck.pid" ;;
+
+# --- przycisk COPY ---------------------------------------------------------
+copy-ustaw)
+	jest_katalog "$1" || blad "zły katalog docelowy"
+	case "$2" in kopia|synchronizacja) ;; *) blad "zły tryb" ;; esac
+	printf 'cel=%s\ntryb=%s\n' "$1" "$2" > $KONF/copy.conf; chmod 644 $KONF/copy.conf
+	mkdir -p "$1" ;;
+copy-uruchom)
+	nohup /etc/powerd/actions/copy </dev/null >/dev/null 2>&1 & ;;
+
+# --- certyfikat i hasło panelu -----------------------------------------------
+cert-nowy)
+	ip=$(ifconfig mvgbe0 | awk '/inet / {print $2; exit}')
+	n=$(hostname)
+	printf '[req]\ndistinguished_name=dn\n[dn]\n' > /tmp/nas-ossl.cnf
+	openssl req -config /tmp/nas-ossl.cnf -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+	    -days 3650 -nodes -subj "/CN=$n" -addext "subjectAltName=IP:$ip,DNS:$n,DNS:$n.local" \
+	    -keyout $KONF/key.pem.nowy -out $KONF/cert.pem.nowy >/dev/null 2>&1 || blad "openssl nie zadziałał"
+	rm -f /tmp/nas-ossl.cnf
+	chmod 600 $KONF/key.pem.nowy; chmod 644 $KONF/cert.pem.nowy
+	mv $KONF/key.pem.nowy $KONF/key.pem; mv $KONF/cert.pem.nowy $KONF/cert.pem
+	nohup sh -c "sleep 1; /etc/rc.d/naspanel restart" </dev/null >/dev/null 2>&1 & ;;
+haslo-ustaw)
+	# stdin: gotowy wpis "pbkdf2$ITER$SOL$SKROT" (liczony w panelu)
+	read w
+	echo "$w" | grep -Eq '^pbkdf2\$[0-9]{3,6}\$[0-9a-f]{32}\$[0-9a-f]{64}$' || blad "zły format"
+	echo "$w" > $KONF/haslo.nowe; chown root:nasweb $KONF/haslo.nowe; chmod 640 $KONF/haslo.nowe
+	mv $KONF/haslo.nowe $KONF/haslo ;;
+
+# --- aktualizacje ------------------------------------------------------------
+aktualizuj)
+	nohup sh -c 'echo "=== $(date) pkgin upgrade"; timeout 900 pkgin -y update; timeout 3600 pkgin -y upgrade; echo "=== $(date) koniec, kod $?"' \
+	    </dev/null >"$LOGI/aktualizacja.log" 2>&1 & ;;
+
+# --- grupy -------------------------------------------------------------------
+grupy)
+	# nazwa gid członkowie (użytkownicy >= 1000 i grupy własne >= 1000 + users)
+	awk -F: '(($3 >= 1000 && $3 < 30000) || $1 == "users") && $1 != "nasweb" { print $1, $3, ($4 == "" ? "-" : $4) }' /etc/group ;;
+grupa-dodaj)
+	jest_nazwa "$1" || blad "zła nazwa grupy"
+	getent group "$1" >/dev/null && blad "grupa już istnieje"
+	groupadd -g "$(awk -F: 'BEGIN{m=1999} $3>m && $3<30000 {m=$3} END{print m+1}' /etc/group)" "$1" ;;
+grupa-usun)
+	jest_nazwa "$1" || blad "zła nazwa"
+	case "$1" in users|wheel|nasweb) blad "grupy systemowej nie można usunąć" ;; esac
+	gid=$(getent group "$1" | cut -d: -f3) || blad "nie ma takiej grupy"
+	[ "$gid" -ge 1000 ] || blad "grupa systemowa"
+	groupdel "$1" ;;
+grupa-czlonkowie)
+	# $1 grupa; stdin: użytkownicy (po jednym)
+	jest_nazwa "$1" || blad "zła nazwa"
+	getent group "$1" >/dev/null || blad "nie ma takiej grupy"
+	case "$1" in wheel) blad "członków wheel zmienia się typem konta" ;; esac
+	lista=""
+	while read u; do
+		[ -z "$u" ] && continue
+		jest_nazwa "$u" && id "$u" >/dev/null 2>&1 || blad "nie ma użytkownika: $u"
+		lista="${lista:+$lista,}$u"
+	done
+	t=$(mktemp)
+	awk -F: -v g="$1" -v l="$lista" 'BEGIN { OFS = ":" } $1 == g { $4 = l } { print }' /etc/group > "$t"
+	cat "$t" > /etc/group; rm -f "$t" ;;
+uzytkownik-typ)
+	# admin = członek wheel (panel administracyjny + doas)
+	jest_nazwa "$1" || blad "zła nazwa"
+	case "$1" in admin) blad "konto admin jest zawsze administratorem" ;; esac
+	id "$1" >/dev/null 2>&1 || blad "nie ma takiego użytkownika"
+	case "$2" in
+	admin) usermod -G wheel "$1" ;;
+	uzytkownik)
+		t=$(mktemp)
+		awk -F: -v u="$1" 'BEGIN { OFS = ":" } $1 == "wheel" {
+			n = split($4, a, ","); s = ""
+			for (i = 1; i <= n; i++) if (a[i] != u) s = s (s == "" ? "" : ",") a[i]
+			$4 = s } { print }' /etc/group > "$t"
+		cat "$t" > /etc/group; rm -f "$t" ;;
+	*) blad "zły typ" ;;
+	esac ;;
+uzytkownik-haslo)
+	# $1 użytkownik; stdin: wiersz 1 = wpis pbkdf2 (panel), wiersz 2 = hasło jawne (Samba, jeśli jest)
+	jest_nazwa "$1" || blad "zła nazwa"
+	id "$1" >/dev/null 2>&1 || blad "nie ma takiego użytkownika"
+	read wpis; read jawne
+	echo "$wpis" | grep -Eq '^pbkdf2\$[0-9]{3,6}\$[0-9a-f]{32}\$[0-9a-f]{64}$' || blad "zły format"
+	t=$(mktemp); touch $KONF/hasla
+	grep -v "^$1 " $KONF/hasla > "$t"; echo "$1 $wpis" >> "$t"
+	chown root:nasweb "$t"; chmod 640 "$t"; mv "$t" $KONF/hasla
+	if [ -x /usr/pkg/bin/smbpasswd ] && [ -n "$jawne" ]; then
+		printf '%s\n%s\n' "$jawne" "$jawne" | /usr/pkg/bin/smbpasswd -a -s "$1" >/dev/null
+	fi ;;
+
+# --- udziały: model jak w Zyxelu --------------------------------------------
+# /etc/nas-panel/udzialy, wiersze:
+#   udzial NAZWA wlasciciel=U kosz=tak|nie smb=tak|nie
+#   prawa NAZWA u:NAZWA=rw|ro g:NAZWA=rw|ro ...   (brak wpisu = brak dostępu)
+#   nfs NAZWA ro|rw KLIENT,KLIENT                  (opcjonalnie, dostęp po IP)
+# katalog udziału: /dysk/NAZWA
+udzialy-model)
+	cat $KONF/udzialy 2>/dev/null ;;
+udzialy-model-ustaw)
+	t=$(mktemp)
+	while read typ nazwa reszta; do
+		[ -z "$typ" ] && continue
+		echo "$nazwa" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || { rm -f "$t"; blad "zła nazwa udziału: $nazwa"; }
+		case "$typ" in
+		udzial)
+			for x in $reszta; do case "$x" in
+				wlasciciel=*) jest_nazwa "${x#*=}" && id "${x#*=}" >/dev/null 2>&1 || { rm -f "$t"; blad "zły właściciel"; } ;;
+				kosz=tak|kosz=nie|smb=tak|smb=nie) ;;
+				*) rm -f "$t"; blad "zła opcja: $x" ;;
+			esac; done ;;
+		prawa)
+			for x in $reszta; do
+				echo "$x" | grep -Eq '^[ug]:[a-z][a-z0-9_-]{0,30}=(rw|ro)$' || { rm -f "$t"; blad "złe prawo: $x"; }
+			done ;;
+		nfs)
+			set -- $reszta
+			case "$1" in ro|rw) ;; *) rm -f "$t"; blad "zły tryb NFS" ;; esac
+			for c in $(echo "$2" | tr ',' ' '); do jest_ip4_lub_siec "$c" || { rm -f "$t"; blad "zły klient NFS: $c"; }; done ;;
+		*) rm -f "$t"; blad "zły wiersz: $typ" ;;
+		esac
+		echo "$typ $nazwa $reszta" >> "$t"
+	done
+	cp $KONF/udzialy $KONF/udzialy.poprzedni 2>/dev/null
+	mv "$t" $KONF/udzialy; chmod 644 $KONF/udzialy
+	/usr/pkg/sbin/nas-udzialy-zastosuj ;;
+
+# --- przeglądarka plików ------------------------------------------------------
+# ścieżki (mogą mieć spacje i polskie znaki) przychodzą na stdin:
+#   wiersz 1: nazwa udziału, wiersz 2: ścieżka względna ("" = katalog główny)
+pliki-lista|pliki-info|pliki-czytaj|pliki-folder|pliki-usun|pliki-zmien|pliki-dopisz|pliki-zakoncz)
+	IFS= read -r udz; IFS= read -r wzgl
+	echo "$udz" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || blad "zły udział"
+	grep -q "^udzial $udz " $KONF/udzialy 2>/dev/null || blad "nie ma takiego udziału"
+	case "/$wzgl/" in */../*|*/./*) blad "zła ścieżka" ;; esac
+	baza="/dysk/$udz"; sciezka="$baza${wzgl:+/$wzgl}"
+	wl=$(awk -v n="$udz" '$1 == "udzial" && $2 == n { for (i = 3; i <= NF; i++) if ($i ~ /^wlasciciel=/) { sub(/^wlasciciel=/, "", $i); print $i } }' $KONF/udzialy)
+	wl=${wl:-admin}
+	case "$polecenie" in
+	pliki-lista)
+		[ -d "$sciezka" ] || blad "nie ma takiego katalogu"
+		cd "$sciezka" && for f in .[!.]* * ; do
+			[ -e "$f" ] || continue
+			case "$f" in .nas-*|.recycle) continue ;; esac
+			t=f; [ -d "$f" ] && t=d
+			printf '%s\t%s\t%s\t%s\n' "$t" "$(stat -f %z "$f")" "$(stat -f %m "$f")" "$f"
+		done ;;
+	pliki-info)
+		[ -f "$sciezka" ] || blad "nie ma takiego pliku"
+		stat -f %z "$sciezka" ;;
+	pliki-czytaj)
+		[ -f "$sciezka" ] || blad "nie ma takiego pliku"
+		cat "$sciezka" ;;
+	pliki-folder)
+		[ -n "$wzgl" ] || blad "podaj nazwę"
+		mkdir -p "$sciezka" && chown "$wl:users" "$sciezka" ;;
+	pliki-usun)
+		[ -n "$wzgl" ] || blad "nie można usunąć katalogu głównego udziału"
+		[ -e "$sciezka" ] || blad "nie ma takiego pliku"
+		rm -rf "$sciezka" ;;
+	pliki-zmien)
+		IFS= read -r nowa
+		[ -n "$wzgl" ] || blad "nie można zmienić katalogu głównego"
+		case "/$nowa/" in */../*|*/./*|//) blad "zła nowa ścieżka" ;; esac
+		[ -e "$baza/$nowa" ] && blad "taki plik już istnieje"
+		mkdir -p "$(dirname "$baza/$nowa")"; mv "$sciezka" "$baza/$nowa" ;;
+	pliki-dopisz)
+		# reszta stdin = kolejny kawałek pliku; zapis do pliku tymczasowego obok
+		d=$(dirname "$sciezka"); [ -d "$d" ] || blad "nie ma katalogu docelowego"
+		cz="$d/.nas-czesc.$(basename "$sciezka")"
+		IFS= read -r nr
+		[ "$nr" = 0 ] && : > "$cz"
+		# kawałek przychodzi jako base64 (jeden wiersz) – dekoduje openssl
+		openssl base64 -d -A >> "$cz" || blad "złe dane"
+		stat -f %z "$cz" ;;
+	pliki-zakoncz)
+		d=$(dirname "$sciezka"); cz="$d/.nas-czesc.$(basename "$sciezka")"
+		[ -f "$cz" ] || blad "brak przesłanych danych"
+		mv "$cz" "$sciezka"; chown "$wl:users" "$sciezka"; chmod 664 "$sciezka" ;;
+	esac ;;
+
+*)
+	echo "nieznane polecenie" >&2
+	exit 1 ;;
+esac

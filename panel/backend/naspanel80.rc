@@ -1,0 +1,18 @@
+#!/bin/sh
+#
+# PROVIDE: naspanel80
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+#
+# Port 80: tylko przekierowanie na panel HTTPS (bez API, bez Lua).
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="naspanel80"
+rcvar=$name
+command="/usr/libexec/httpd"
+pidfile="/var/run/${name}.pid"
+command_args="-b -P ${pidfile} -U nasweb -I 80 -n /usr/pkg/share/nas-panel/http80"
+
+load_rc_config $name
+run_rc_command "$1"

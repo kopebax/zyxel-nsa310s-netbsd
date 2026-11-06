@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# PROVIDE: leds
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+#
+# Diody NSA310S: zielona systemowa po starcie, pomarańczowa przy wyłączaniu;
+# HDD/USB zielone, gdy wykryto dysk SATA / pamięć USB.
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="leds"
+rcvar=$name
+start_cmd="leds_start"
+stop_cmd="leds_stop"
+
+led()
+{
+	/usr/sbin/gpioctl -q gpio0 "$1" "$2" 2>/dev/null
+}
+
+leds_start()
+{
+	led sys_orange 0
+	led sys_green 1
+	led hdd_red 0
+	led copy_green 0
+	led copy_red 0
+	if /sbin/sysctl -n hw.disknames | grep -q 'wd[0-9]'; then
+		led hdd_green 1
+	else
+		led hdd_green 0
+	fi
+	# usypianie dysku po bezczynności (ustawienie z panelu WWW)
+	m=$(cat /etc/nas-panel/usypianie 2>/dev/null)
+	[ -n "$m" ] && [ "$m" -gt 0 ] 2>/dev/null && /sbin/atactl wd0 setidle $((m * 60)) 2>/dev/null
+	if /sbin/sysctl -n hw.disknames | grep -q 'sd[0-9]'; then
+		led usb_green 1
+	else
+		led usb_green 0
+	fi
+}
+
+leds_stop()
+{
+	led sys_green 0
+	led sys_orange 1
+}
+
+load_rc_config $name
+run_rc_command "$1"

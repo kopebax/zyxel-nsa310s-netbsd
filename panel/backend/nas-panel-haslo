@@ -1,0 +1,48 @@
+#!/usr/bin/lua
+-- nas-panel-haslo – ustawia hasło panelu WWW (uruchamiać jako root: doas nas-panel-haslo).
+-- Hasło czytane z wejścia (bez echa na terminalu), zapisywane jako PBKDF2-HMAC-SHA256.
+
+package.path = "/usr/pkg/share/nas-panel/?.lua;" .. package.path
+local sha = require 'sha256'
+
+local PLIK = "/etc/nas-panel/haslo"
+local ITER = tonumber(os.getenv("NAS_PANEL_ITER") or "") or 300
+
+local function czytaj_haslo(zacheta)
+	io.stderr:write(zacheta)
+	os.execute("stty -echo 2>/dev/null")
+	local h = io.read("l")
+	os.execute("stty echo 2>/dev/null")
+	io.stderr:write("\n")
+	return h
+end
+
+local h1 = czytaj_haslo("Nowe hasło panelu: ")
+if not h1 or #h1 < 8 then
+	io.stderr:write("Hasło musi mieć co najmniej 8 znaków.\n")
+	os.exit(1)
+end
+if os.getenv("NAS_PANEL_BEZ_POTWIERDZENIA") == nil then
+	local h2 = czytaj_haslo("Powtórz hasło: ")
+	if h1 ~= h2 then
+		io.stderr:write("Hasła się różnią.\n")
+		os.exit(1)
+	end
+end
+
+local f = io.open("/dev/urandom", "rb")
+local sol = sha.hex(f:read(16))
+f:close()
+
+io.stderr:write("Liczę skrót (kilka sekund)...\n")
+local wpis = string.format("pbkdf2$%d$%s$%s\n", ITER, sol, sha.pbkdf2(h1, sol, ITER))
+
+os.execute("mkdir -p /etc/nas-panel")
+local o = assert(io.open(PLIK .. ".nowe", "w"))
+o:write(wpis)
+o:close()
+os.execute("chown root:nasweb " .. PLIK .. ".nowe && chmod 640 " .. PLIK .. ".nowe")
+assert(os.rename(PLIK .. ".nowe", PLIK))
+-- wyloguj wszystkie sesje
+os.execute("rm -f /var/run/nas-panel/[0-9a-f]*")
+io.stderr:write("Hasło zmienione.\n")

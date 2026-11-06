@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# NSA310S: przycisk RESET (z tyłu) – przytrzymaj 5 s, żeby zrestartować system.
+# Krótkie naciśnięcie: tylko mignięcie diodą systemową.
+#
+led() { /usr/sbin/gpioctl -q gpio0 "$1" "$2" 2>/dev/null; }
+
+case "${2}" in
+pressed)
+	(
+		led sys_orange 1; sleep 0.3; led sys_orange 0
+		sleep 4.7
+		if /usr/sbin/gpioctl gpio0 btn_reset 2>/dev/null | grep -q 'state 0'; then
+			led sys_green 0; led sys_orange 1
+			/sbin/shutdown -r now "reset button"
+		fi
+	) &
+	exit 0
+	;;
+released)
+	exit 0
+	;;
+*)
+	logger -p warning "${0}: unsupported event ${2} on device ${1}" >&1
+	exit 1
+	;;
+esac

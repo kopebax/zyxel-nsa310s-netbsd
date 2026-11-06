@@ -1,0 +1,3 @@
+*/5 * * * * /usr/pkg/sbin/nas-temperatura
+@reboot /usr/pkg/sbin/nas-harmonogram uzbroj
+* * * * * /usr/pkg/sbin/nas-harmonogram teraz

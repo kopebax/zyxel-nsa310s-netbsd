@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# nas-temperatura – strażnik temperatury dysku (cron co 5 min).
+# Wentylatorem steruje mikrokontroler płyty (I2C 0x0a), którego NetBSD nie
+# obsługuje, więc pilnujemy skutku: temperatury dysku z SMART.
+#   >= 55 °C: ostrzeżenie w dzienniku + czerwona dioda HDD
+#   >= 60 °C: bezpieczne wyłączenie NAS-a
+#
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin
+OSTRZEZENIE=55
+WYLACZENIE=60
+
+# atactl, nie smartctl: smartctl zawiesza kolejkę ATA na mvsata
+# wiersz atrybutu 194: "194  41    0     no  online  positive    Temperature   41 Lifetime..."
+# (opis ma stałą szerokość 27 znaków po "tive    ", dalej wartość surowa)
+t=$(atactl wd0 smart status 2>/dev/null | awk '$1 == 194 && match($0, /tive    /) {
+	split(substr($0, RSTART + 8 + 28), r, " "); print r[1]; exit }')
+case "$t" in
+''|*[!0-9]*) exit 0 ;;		# brak dysku albo odczytu
+esac
+
+if [ "$t" -ge "$WYLACZENIE" ]; then
+	logger -p crit "nas-temperatura: dysk ${t} C >= ${WYLACZENIE} C - wylaczam NAS"
+	gpioctl -q gpio0 hdd_red 1
+	shutdown -p +1 "temperatura dysku ${t} C"
+elif [ "$t" -ge "$OSTRZEZENIE" ]; then
+	logger -p warning "nas-temperatura: dysk ${t} C >= ${OSTRZEZENIE} C - sprawdz wentylator"
+	gpioctl -q gpio0 hdd_red 1
+else
+	gpioctl -q gpio0 hdd_red 0
+fi

@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# NSA310S: przycisk COPY (z przodu) jest zgłaszany jako hotkey "copy".
+# Po naciśnięciu uruchamia /etc/powerd/actions/copy (jako root, w tle),
+# jeśli istnieje i jest wykonywalny; bez niego tylko mruga diodą COPY.
+#
+led() { /usr/sbin/gpioctl -q gpio0 "$1" "$2" 2>/dev/null; }
+
+case "${2}" in
+pressed)
+	if [ "${1}" = copy ] && [ -x /etc/powerd/actions/copy ]; then
+		logger -p notice "hotkey_button: COPY - running /etc/powerd/actions/copy"
+		/etc/powerd/actions/copy >/dev/null 2>&1 &
+	else
+		logger -p notice "hotkey_button: ${1} - no action"
+		( for i in 1 2 3; do led copy_green 1; sleep 0.2; led copy_green 0; sleep 0.2; done ) &
+	fi
+	exit 0
+	;;
+released)
+	exit 0
+	;;
+*)
+	logger -p warning "${0}: unsupported event ${2} on device ${1}" >&1
+	exit 1
+	;;
+esac

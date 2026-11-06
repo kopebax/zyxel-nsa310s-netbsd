@@ -1,0 +1,7 @@
+/dev/sd0f	/		ffs	rw,log		1 1
+/dev/sd0e	/boot		msdos	rw,noauto	0 0
+ptyfs		/dev/pts	ptyfs	rw
+procfs		/proc		procfs	rw
+tmpfs		/tmp		tmpfs	rw,-s=32M
+# dysk danych montuje /etc/rc.d/dysk (tylko gdy jest podłączony)
+NAME=nas-dane	/dysk		ffs	rw,log,noatime,noauto	0 0
